@@ -1,0 +1,159 @@
+{
+  "version": 2,
+  "entities": [
+    {
+      "id": 1,
+      "name": "Imported Level",
+      "asset": "level.glb",
+      "body": "static"
+    },
+    {
+      "id": 2,
+      "name": "Animated Robot",
+      "asset": "robot.glb",
+      "position": [
+        -2,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Rotating Exhibit",
+      "position": [
+        3,
+        1,
+        0
+      ],
+      "behavior": "spin",
+      "speed": 0.6
+    },
+    {
+      "id": 4,
+      "name": "Exhibit Child",
+      "asset": "crate.glb",
+      "parent": 3,
+      "position": [
+        0,
+        1,
+        0
+      ],
+      "scale": [
+        0.8,
+        0.8,
+        0.8
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Physics Crate 1",
+      "asset": "crate.glb",
+      "position": [
+        1.0,
+        2.0,
+        -3
+      ],
+      "body": "dynamic",
+      "mass": 2
+    },
+    {
+      "id": 11,
+      "name": "Physics Crate 2",
+      "asset": "crate.glb",
+      "position": [
+        2.1,
+        3.2,
+        -3
+      ],
+      "body": "dynamic",
+      "mass": 2
+    },
+    {
+      "id": 12,
+      "name": "Physics Crate 3",
+      "asset": "crate.glb",
+      "position": [
+        1.0,
+        4.4,
+        -3
+      ],
+      "body": "dynamic",
+      "mass": 2
+    },
+    {
+      "id": 13,
+      "name": "Physics Crate 4",
+      "asset": "crate.glb",
+      "position": [
+        2.1,
+        5.6,
+        -3
+      ],
+      "body": "dynamic",
+      "mass": 2
+    },
+    {
+      "id": 14,
+      "name": "Physics Crate 5",
+      "asset": "crate.glb",
+      "position": [
+        1.0,
+        6.8,
+        -3
+      ],
+      "body": "dynamic",
+      "mass": 2
+    },
+    {
+      "id": 30,
+      "name": "Collectible 1",
+      "asset": "crate.glb",
+      "position": [
+        -3,
+        0.8,
+        4
+      ],
+      "scale": [
+        0.4,
+        0.4,
+        0.4
+      ],
+      "behavior": "spin",
+      "speed": 1.4
+    },
+    {
+      "id": 31,
+      "name": "Collectible 2",
+      "asset": "crate.glb",
+      "position": [
+        3,
+        0.8,
+        4
+      ],
+      "scale": [
+        0.4,
+        0.4,
+        0.4
+      ],
+      "behavior": "spin",
+      "speed": 1.4
+    },
+    {
+      "id": 32,
+      "name": "Collectible 3",
+      "asset": "crate.glb",
+      "position": [
+        0,
+        0.8,
+        -6
+      ],
+      "scale": [
+        0.4,
+        0.4,
+        0.4
+      ],
+      "behavior": "spin",
+      "speed": 1.4
+    }
+  ]
+}
