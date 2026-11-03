@@ -19,7 +19,7 @@ std::vector<glm::mat4> samplePose(const std::vector<Node>& nodes, const std::vec
             for (const auto& c : a.channels) {
                 auto it = std::upper_bound(c.times.begin(), c.times.end(), t);
                 size_t next = std::min(static_cast<size_t>(it - c.times.begin()), c.times.size() - 1),
-                       prev = next ? next - 1 : 0;
+                       prev = it == c.times.end() ? next : (next ? next - 1 : 0);
                 float f = c.step || next == prev
                               ? 0
                               : std::clamp((t - c.times[prev]) / (c.times[next] - c.times[prev]), 0.0f, 1.0f);

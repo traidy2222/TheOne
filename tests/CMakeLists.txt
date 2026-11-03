@@ -198,6 +198,11 @@ target_link_libraries(theone_parallel_loading PRIVATE TheOne::Scene nlohmann_jso
 set_target_properties(theone_parallel_loading PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 add_test(NAME engine_parallel_loading COMMAND theone_parallel_loading "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/assets/sandbox.one" "${PROJECT_BINARY_DIR}/verification/parallel-loading")
 set_tests_properties(engine_parallel_loading PROPERTIES TIMEOUT 30)
+add_executable(theone_animation_tests content/animation_tests.cpp)
+target_link_libraries(theone_animation_tests PRIVATE TheOne::Animation)
+set_target_properties(theone_animation_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+add_test(NAME engine_animation COMMAND theone_animation_tests)
+
 add_executable(theone_editor_history content/editor_history_tests.cpp)
 target_link_libraries(theone_editor_history PRIVATE TheOne::Scene)
 set_target_properties(theone_editor_history PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
