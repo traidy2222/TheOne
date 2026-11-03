@@ -139,6 +139,23 @@ int main() {
         for (size_t p = 0; p < offAxis.size(); p += 3)
             offAxisCount += offAxis[p] > 220;
         need(offAxisCount > 10, "An off-axis star incorrectly occluded its own photosphere");
+        scene = {};
+        scene.metresPerUnit = 1e6;
+        scene.stars = {StellarEmitter{{-.05 * astronomicalUnitMetres, 0, 0}, solarRadiusMetres, 5772, 1}};
+        scene.occluders = {{{0, 0, 0}, 6371000, 2}};
+        camera.position = {3 * 6.371f, .65f * 6.371f, 2 * 6.371f};
+        auto towardBody = glm::normalize(-camera.position);
+        camera.yaw = std::atan2(towardBody.x, towardBody.z);
+        camera.pitch = std::asin(towardBody.y);
+        camera.nearPlane = .02f;
+        camera.farPlane = 2000;
+        auto astronomical = capture();
+        size_t astronomicalCount = 0;
+        for (size_t p = 0; p < astronomical.size(); p += 3)
+            astronomicalCount += astronomical[p] > 220;
+        std::cout<<"ASTRONOMICAL bright_pixels="<<astronomicalCount<<'\n';
+        need(astronomicalCount > 100,
+             "Astronomical disk vanished with a nonblocking body in the visibility list");
         renderer.clearStellarScene();
         renderer.close();
         need(renderer.errors() == 0, "Stellar Vulkan synchronization validation failed");

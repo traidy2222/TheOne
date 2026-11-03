@@ -10,17 +10,20 @@ float sphereEntry(vec3 point, vec3 direction, vec4 sphere) {
     return t + halfChord > 0 ? max(0, t - halfChord) : -1;
 }
 bool stellarBlocked(vec3 point, vec3 direction, float end, int excluded, int emitter) {
-    for (int star = 0; star < int(vol.stellarCounts.x); ++star) {
-        if (star == emitter)
-            continue;
-        float hit = sphereEntry(point, direction, vol.starPositionRadius[star]);
-        if (hit >= 0 && hit < end)
-            return true;
-    }
-    for (int j = 0; j < int(vol.stellarCounts.y); ++j) {
-        if (j == excluded)
-            continue;
-        float hit = sphereEntry(point, direction, vol.occultingSpheres[j]);
+    int starCount = int(vol.stellarCounts.x), bodyCount = int(vol.stellarCounts.y);
+    for (int i = 0; i < starCount + bodyCount; ++i) {
+        vec4 sphere;
+        if (i < starCount) {
+            if (i == emitter)
+                continue;
+            sphere = vol.starPositionRadius[i];
+        } else {
+            int body = i - starCount;
+            if (body == excluded)
+                continue;
+            sphere = vol.occultingSpheres[body];
+        }
+        float hit = sphereEntry(point, direction, sphere);
         if (hit >= 0 && hit < end)
             return true;
     }
