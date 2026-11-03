@@ -113,6 +113,15 @@ int main() {
         auto partial = capture();
         need(partial[center] > dark[center] + 2 && partial[center] < near[center] - 2,
              "Finite stellar disk did not produce partial shadow");
+        scene.occluders.clear();
+        scene.stars[0].activity.enabled = true;
+        scene.stars[0].activity.granuleDiameterMetres = .01;
+        auto physical = capture();
+        scene.view = StellarView::EuvDiagnostic;
+        auto diagnostic = capture();
+        need(physical == diagnostic, "False colour leaked into physical surface illumination");
+        scene.view = StellarView::Visible;
+        scene.stars[0].activity.enabled = false;
         draws.clear();
         vertices.clear();
         ++revision;
@@ -153,9 +162,55 @@ int main() {
         size_t astronomicalCount = 0;
         for (size_t p = 0; p < astronomical.size(); p += 3)
             astronomicalCount += astronomical[p] > 220;
-        std::cout<<"ASTRONOMICAL bright_pixels="<<astronomicalCount<<'\n';
+        std::cout << "ASTRONOMICAL bright_pixels=" << astronomicalCount << '\n';
         need(astronomicalCount > 100,
              "Astronomical disk vanished with a nonblocking body in the visibility list");
+        scene.occluders.clear();
+        scene.stars[0].activity.enabled = true;
+        auto starCentre = glm::vec3(scene.stars[0].positionMetres / scene.metresPerUnit);
+        float solarRadius = float(solarRadiusMetres / scene.metresPerUnit);
+        camera.position = starCentre + glm::vec3(0, 0, solarRadius * 4);
+        camera.yaw = 3.141592653589793f;
+        camera.pitch = 0;
+        lighting.exposure = std::exp2(-23.f);
+        renderer.setLighting(lighting);
+        auto activeVisible = capture();
+        need(activeVisible[center] > 40, "Activity photosphere vanished");
+        // The close observer has a large local translation; its sky must agree
+        // with a star-centred origin, rather than suffer inverse-VP banding.
+        scene.originMetres = scene.stars[0].positionMetres;
+        camera.position -= starCentre;
+        auto centredVisible = capture();
+        need(centredVisible == activeVisible,
+             "Stellar inspection rays changed under local origin translation");
+        camera.position += starCentre;
+        scene.originMetres = {0, 0, 0};
+        scene.view = StellarView::EuvDiagnostic;
+        lighting.exposure = std::exp2(-16.f);
+        renderer.setLighting(lighting);
+        auto activeEuv = capture();
+        scene.timeSeconds = 900;
+        auto evolved = capture();
+        size_t changed = 0, halo = 0;
+        for (size_t p = 0; p < evolved.size(); p += 3) {
+            changed += std::abs(int(evolved[p]) - int(activeEuv[p])) > 2;
+            int x = int(p / 3) % 160, y = int(p / 3) / 160;
+            float r = std::sqrt(float((x - 80) * (x - 80) + (y - 60) * (y - 60)));
+            halo += r > 31 && evolved[p] > 4;
+        }
+        std::cout << "ACTIVITY changed_pixels=" << changed << " off_limb=" << halo << '\n';
+        need(changed > 40, "Procedural star did not evolve with stellar time");
+        need(halo > 10, "Raymarched plasma absent outside the photosphere");
+        scene.occluders = {{{scene.stars[0].positionMetres + glm::dvec3(0, 0, solarRadiusMetres * 2)},
+                            solarRadiusMetres * .5,
+                            3}};
+        auto occultedActivity = capture();
+        need(occultedActivity[center] <= 1, "Foreground sphere failed to clip stellar plasma");
+        scene.occluders.clear();
+        scene.stars[0].powerScale = 0;
+        auto zero = capture();
+        need(std::all_of(zero.begin(), zero.end(), [](unsigned char p) { return p <= 1; }),
+             "Unpowered star created plasma light");
         renderer.clearStellarScene();
         renderer.close();
         need(renderer.errors() == 0, "Stellar Vulkan synchronization validation failed");

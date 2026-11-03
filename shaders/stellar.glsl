@@ -70,7 +70,14 @@ vec3 stellarSurface(vec3 point, vec3 n, vec3 v, vec3 base, float rough, float me
             float den = nh * nh * (a2 - 1) + 1, D = a2 / (STELLAR_PI * den * den + .0001);
             float G = nv / (nv * (1 - k) + k) * nl / (nl * (1 - k) + k);
             vec3 F = F0 + (1 - F0) * pow(1 - vh, 5), specular = D * G * F / (4 * nv * max(nl, .001) + .0001);
-            radiance += ((1 - F) * (1 - metal) * base / STELLAR_PI + specular) * nl *
+            float limb = 1;
+            if (vol.starActivity[star].x > .5) {
+                float fraction = (sampleIndex + .5) / 16.;
+                float mu = sqrt(max(0, 1 - fraction * (2 - fraction * oneMinusCos) / (2 - oneMinusCos)));
+                float coefficient = vol.starActivity[star].w;
+                limb = (1 - coefficient + coefficient * mu) / (1 - coefficient / 3);
+            }
+            radiance += limb * ((1 - F) * (1 - metal) * base / STELLAR_PI + specular) * nl *
                         vol.starRadiance[star].rgb * (omega / 16.);
         }
     }

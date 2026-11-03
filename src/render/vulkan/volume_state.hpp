@@ -20,6 +20,8 @@ struct VolumeParameters {
     glm::vec4 stellarCounts;
     std::array<glm::vec4, 4> starPositionRadius, starRadiance;
     std::array<glm::vec4, 16> occultingSpheres;
+    std::array<glm::vec4, 4> starActivity, starMotion, starAtmosphere;
+    std::array<glm::vec4, 16> starRegionNormal, starRegionTangent;
 };
 static_assert(sizeof(VolumeCell) == 48);
 struct VolumePush {

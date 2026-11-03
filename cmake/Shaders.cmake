@@ -2,7 +2,7 @@ foreach(SHADER scene.vert scene.frag shadow.vert mesh.vert mesh_shadow.vert shad
   set(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/shaders/${SHADER}.spv")
   add_custom_command(OUTPUT "${OUTPUT}" COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders"
     COMMAND "${Vulkan_GLSLC_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}" -o "${OUTPUT}"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/skinning.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/scene_uniform.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/cascades.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/volume_common.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/stellar.glsl" VERBATIM)
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/skinning.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/scene_uniform.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/cascades.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/volume_common.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/stellar.glsl" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/stellar_activity.glsl" VERBATIM)
   list(APPEND SHADERS "${OUTPUT}")
 endforeach()
 add_custom_target(theone_shaders DEPENDS ${SHADERS})

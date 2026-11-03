@@ -55,6 +55,8 @@ layout(std140, set = VOLUME_SET, binding = 6) uniform VolumeParameters {
     vec4 stellarCounts;
     vec4 starPositionRadius[4],starRadiance[4];
     vec4 occultingSpheres[16];
+    vec4 starActivity[4],starMotion[4],starAtmosphere[4];
+    vec4 starRegionNormal[16],starRegionTangent[16];
 }
 vol;
 layout(set = VOLUME_SET, binding = 8) uniform sampler2D opaqueDepth;

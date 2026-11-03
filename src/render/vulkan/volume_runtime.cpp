@@ -117,7 +117,7 @@ void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool s
     const auto& fuel = v.scene.fuel;
     p.inverseVP = glm::inverse(
         camera.projection(float(swapchainState.extent.width) / swapchainState.extent.height) * camera.view());
-    p.eye = glm::vec4(camera.position, 1);
+    p.eye = glm::vec4(camera.position, float(swapchainState.extent.width) / swapchainState.extent.height);
     p.origin = glm::vec4(d.origin, 0);
     p.extent = glm::vec4(d.extent, 0);
     p.grid = glm::uvec4(g.resolution, v.active ? 1 : 0);
@@ -131,7 +131,7 @@ void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool s
     p.skyRadiance = glm::vec4(v.lighting.skyRadiance, d.initialTurbulenceScale);
     if (v.stellarActive) {
         const auto& stars = v.stellarScene;
-        p.stellarCounts = {float(stars.stars.size()), float(stars.occluders.size()), 1, 0};
+        p.stellarCounts = {float(stars.stars.size()), float(stars.occluders.size()), 1, float(stars.view)};
         p.sunRadiance = glm::vec4(0);
         p.skyRadiance = glm::vec4(0, 0, 0, d.initialTurbulenceScale);
         for (size_t i = 0; i < stars.stars.size(); ++i) {
@@ -139,7 +139,26 @@ void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool s
             p.starPositionRadius[i] =
                 glm::vec4(glm::vec3((star.positionMetres - stars.originMetres) / stars.metresPerUnit),
                           float(star.radiusMetres / stars.metresPerUnit));
-            p.starRadiance[i] = glm::vec4(glm::vec3(stellarBandRadiance(star)), 0);
+            p.starRadiance[i] = glm::vec4(glm::vec3(stellarBandRadiance(star)), float(star.kelvin));
+            const auto& a = star.activity;
+            if (a.enabled) {
+                p.starActivity[i] = {a.enabled ? 1.f : 0.f,
+                                     float(star.radiusMetres / a.granuleDiameterMetres), a.granuleContrast,
+                                     a.limbDarkening};
+                p.starMotion[i] = {float(stars.timeSeconds / a.granuleLifetimeSeconds),
+                                   float(stars.timeSeconds * 6.283185307179586 / a.rotationPeriodSeconds),
+                                   a.magneticStrength, float(a.seed)};
+                p.starAtmosphere[i] = {float(a.atmosphereSteps),
+                                       float(a.baseElectronDensityPerM3 * 6.6524587e-29 * star.radiusMetres),
+                                       a.atmosphereRadius,
+                                       float(stars.timeSeconds * 50000. / star.radiusMetres)};
+                for (uint32_t region = 0; region < 4; ++region) {
+                    auto r = stellarActivityRegion(star, region);
+                    p.starRegionNormal[i * 4 + region] =
+                        glm::vec4(glm::vec3(r.normal), float(r.halfSeparation));
+                    p.starRegionTangent[i * 4 + region] = glm::vec4(glm::vec3(r.tangent), float(r.height));
+                }
+            }
         }
         for (size_t i = 0; i < stars.occluders.size(); ++i) {
             const auto& b = stars.occluders[i];
@@ -151,7 +170,7 @@ void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool s
     p.ray = {v.scene.rayStepScale, float(v.scene.maximumRaySteps), v.lighting.exposure, shadows ? 1 : 0};
     p.lightVP = sceneState.cascades.matrices;
     p.splits = sceneState.cascades.splits;
-    p.forward = glm::vec4(camera.forward(), 0);
+    p.forward = glm::vec4(camera.forward(), 1 / std::abs(camera.projection(1)[1][1]));
     p.initial = {v.active ? v.scene.initialSootKgPerM3 : 0, v.active ? v.scene.initialKelvin : 0,
                  d.vorticityConfinement, fuel.flameSpeed};
     p.counts = {v.active ? uint32_t(v.scene.sources.size()) : 0,
