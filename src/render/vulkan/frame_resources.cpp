@@ -17,7 +17,7 @@ void Renderer::Impl::createFrameResources() {
         if (deviceState.timestampBits) {
             VkQueryPoolCreateInfo q{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
             q.queryType = VK_QUERY_TYPE_TIMESTAMP;
-            q.queryCount = 12;
+            q.queryCount = 28;
             check(vkCreateQueryPool(deviceState.device, &q, nullptr, &f.queries), "create frame queries");
         }
     }

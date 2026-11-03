@@ -1,6 +1,7 @@
 #include "backend.hpp"
 #include "volume_state.hpp"
 #include <cmath>
+#include <cstdlib>
 namespace one {
 void Renderer::Impl::retireVolumeBuffers() {
     if (!volumes.gpu)
@@ -75,6 +76,23 @@ void Renderer::Impl::readVolumeDiagnostics(uint32_t slot) {
                 check(result, "volume timestamps");
         }
         frames[slot].volumeQueryWritten = false;
+        if (std::getenv("THEONE_VOLUME_PROFILE_PHASES") && frames[slot].queries) {
+            uint64_t phases[16]{};
+            if (vkGetQueryPoolResults(deviceState.device, frames[slot].queries, 12, 16, sizeof(phases),
+                                      phases, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+                uint64_t mask = deviceState.timestampBits >= 64
+                                    ? UINT64_MAX
+                                    : (uint64_t(1) << deviceState.timestampBits) - 1;
+                std::cout << "VOLUME_PHASE frame=" << frames[slot].serial;
+                const char* names[]{"velocity", "transport",  "forces",      "rhs",
+                                    "pressure", "projection", "diagnostics", "occupancy"};
+                for (int a = 0; a < 8; ++a)
+                    std::cout << ' ' << names[a] << '='
+                              << double((phases[a * 2 + 1] - phases[a * 2]) & mask) *
+                                     deviceState.timestampPeriod / 1e6;
+                std::cout << '\n';
+            }
+        }
     }
 }
 void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool shadows) {
@@ -163,7 +181,7 @@ void Renderer::Impl::recordVolumeSimulation(uint32_t index) {
     vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
                          &fill, 0, nullptr, 0, nullptr);
     if (frame().queries) {
-        vkCmdResetQueryPool(command, frame().queries, 6, 6);
+        vkCmdResetQueryPool(command, frame().queries, 6, 22);
         vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, frame().queries, 6);
     }
     volumeBarrier();
@@ -177,7 +195,12 @@ void Renderer::Impl::recordVolumeSimulation(uint32_t index) {
         vkCmdPushConstants(command, v.pipelineLayout,
                            VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push),
                            &push);
-        vkCmdDispatch(command, (g.resolution.x + 3) / 4, (g.resolution.y + 3) / 4, (g.resolution.z + 3) / 4);
+        if (phase == 7)
+            vkCmdDispatch(command, (g.resolution.x + 7) / 8, (g.resolution.y + 7) / 8,
+                          (g.resolution.z + 7) / 8);
+        else
+            vkCmdDispatch(command, (g.resolution.x + 3) / 4, (g.resolution.y + 3) / 4,
+                          (g.resolution.z + 3) / 4);
         volumeBarrier();
     };
     if (v.initialize) {
@@ -196,24 +219,48 @@ void Renderer::Impl::recordVolumeSimulation(uint32_t index) {
     const auto& d = v.scene.domain;
     auto h = d.extent / glm::vec3(g.resolution);
     double maxDt = std::min(1. / 60., .42 / (double(d.maximumVelocity) * (1. / h.x + 1. / h.y + 1. / h.z)));
+    const char* reference = std::getenv("THEONE_VOLUME_REFERENCE_SOLVER");
+    bool paired = v.simulation[7] && !(reference && std::strcmp(reference, "1") == 0) &&
+                  !std::getenv("THEONE_VOLUME_DISABLE_TILED_PRESSURE");
     uint32_t steps = 0;
+    bool profile = std::getenv("THEONE_VOLUME_PROFILE_PHASES") != nullptr;
+    auto phaseStamp = [&](uint32_t query, bool end) {
+        if (profile && frame().queries && steps == 0)
+            vkCmdWriteTimestamp(
+                command, end ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                frame().queries, query);
+    };
     double target = v.active ? v.scene.timeSeconds : 0;
     while (v.simulated + double(float(maxDt)) <= target + 1e-6 && steps < d.maximumSubsteps) {
         float dt = float(maxDt);
         float time = float(v.simulated);
+        phaseStamp(12, false);
         dispatch(1, dt, time);
+        phaseStamp(13, true);
+        phaseStamp(14, false);
         v.state = 1 - v.state;
         dispatch(2, dt, time);
+        phaseStamp(15, true);
+        phaseStamp(16, false);
         v.state = 1 - v.state;
         dispatch(3, dt, time);
+        phaseStamp(17, true);
+        phaseStamp(18, false);
         v.state = 1 - v.state;
         dispatch(4, dt, time);
+        phaseStamp(19, true);
+        phaseStamp(20, false);
         uint32_t pressure = 0;
-        for (uint32_t it = 0; it < d.pressureIterations; ++it) {
-            dispatch(5, dt, time, pressure);
+        for (uint32_t it = 0; it < d.pressureIterations;) {
+            uint32_t count = paired && it + 1 < d.pressureIterations ? 2 : 1;
+            dispatch(count == 2 ? 7 : 5, dt, time, pressure);
+            it += count;
             pressure = 1 - pressure;
         }
+        phaseStamp(21, true);
+        phaseStamp(22, false);
         dispatch(6, dt, time, pressure);
+        phaseStamp(23, true);
         v.state = 1 - v.state;
         for (const auto& s : v.scene.sources) {
             double active =
@@ -230,8 +277,18 @@ void Renderer::Impl::recordVolumeSimulation(uint32_t index) {
     // uniform is changed, to the known final ping-pong state sampled by rendering.
     auto* p = static_cast<vulkan::VolumeParameters*>(g.parameters[frameIndex].mapped);
     p->counts.z = v.state;
+    auto frameStamp = [&](uint32_t query, bool end) {
+        if (profile && frame().queries)
+            vkCmdWriteTimestamp(
+                command, end ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                frame().queries, query);
+    };
+    frameStamp(24, false);
     dispatch(9, 0, float(v.simulated));
+    frameStamp(25, true);
+    frameStamp(26, false);
     dispatch(12, 0, float(v.simulated));
+    frameStamp(27, true);
     if (frame().queries)
         vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame().queries, 7);
     v.stats.generation = v.generation;

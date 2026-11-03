@@ -3,6 +3,7 @@
 #define VOLUME_WRITABLE
 #include "volume_common.glsl"
 layout(constant_id = 0) const uint operation = 0;
+layout(constant_id = 1) const bool reusePressureStencil = true;
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 layout(push_constant) uniform Step {
     uint phase;
@@ -163,6 +164,29 @@ float flameFront(ivec3 i, VolumeCell c) {
     return phi;
 }
 shared float sums[64][14];
+shared vec4 maxima[64];
+vec3 velocityAtFace(ivec3 i, int axis) {
+    vec3 p = cellPosition(i);
+    p[axis] += spacing()[axis] * .5;
+    if (!reuseConstrainedFaces)
+        return sampleVelocity(p, step.readState);
+    vec3 result;
+    result[axis] = faceVelocity(i, axis, step.readState);
+    for (int a = 0; a < 3; ++a) {
+        if (a == axis)
+            continue;
+        float value = 0;
+        for (int k = 0; k < 4; ++k) {
+            int first = k & 1, second = k >> 1;
+            ivec3 j = i;
+            j[axis] += axis < a ? first : second;
+            j[a] += (axis < a ? second : first) - 1;
+            value += .25 * faceVelocity(j, a, step.readState);
+        }
+        result[a] = value;
+    }
+    return result;
+}
 void main() {
     ivec3 i = ivec3(gl_GlobalInvocationID);
     bool valid = !outside(i);
@@ -180,21 +204,34 @@ void main() {
             sums[lane][6 + a] = valid ? ledgers[id].budget[a] : 0;
             sums[lane][10 + a] = valid ? ledgers[id].species[a] : 0;
         }
+        maxima[lane] = vec4(0);
         if (valid && !solidCell(i)) {
-            atomicMax(diagnostics[8], floatBitsToUint(temperature(c)));
-            atomicMax(diagnostics[9], floatBitsToUint(length(c.velocity.xyz)));
-            if (c.species.z > 1e-6)
-                atomicAdd(diagnostics[10], 1);
-            atomicMax(diagnostics[11], floatBitsToUint(abs(divergenceAt(i) - c.thermal.z)));
+            maxima[lane] = vec4(temperature(c), length(c.velocity.xyz), abs(divergenceAt(i) - c.thermal.z),
+                                c.species.z > 1e-6 ? 1 : 0);
+            if (!reusePressureStencil) {
+                atomicMax(diagnostics[8], floatBitsToUint(maxima[lane].x));
+                atomicMax(diagnostics[9], floatBitsToUint(maxima[lane].y));
+                atomicMax(diagnostics[11], floatBitsToUint(maxima[lane].z));
+                atomicAdd(diagnostics[10], uint(maxima[lane].w));
+            }
         }
         barrier();
         for (uint span = 32; span > 0; span /= 2) {
-            if (lane < span)
+            if (lane < span) {
                 for (uint a = 0; a < 14; ++a)
                     sums[lane][a] += sums[lane + span][a];
+                maxima[lane].xyz = max(maxima[lane].xyz, maxima[lane + span].xyz);
+                maxima[lane].w += maxima[lane + span].w;
+            }
             barrier();
         }
         if (lane == 0) {
+            if (reusePressureStencil) {
+                atomicMax(diagnostics[8], floatBitsToUint(maxima[0].x));
+                atomicMax(diagnostics[9], floatBitsToUint(maxima[0].y));
+                atomicMax(diagnostics[11], floatBitsToUint(maxima[0].z));
+                atomicAdd(diagnostics[10], uint(maxima[0].w));
+            }
             for (uint a = 0; a < 6; ++a)
                 addFloat(a, sums[0][a]);
             for (uint a = 0; a < 8; ++a)
@@ -300,6 +337,12 @@ void main() {
                 }
             result.velocity.w = 0;
         }
+        for (int axis = 0; axis < 3; ++axis)
+            if (blockedFace(i, axis)) {
+                vec3 face = p;
+                face[axis] += h[axis] * .5;
+                result.velocity[axis] = boundaryVelocity(face)[axis];
+            }
         storeCell(i, writeState, result);
         return;
     }
@@ -307,7 +350,7 @@ void main() {
         for (int a = 0; a < 3; ++a) {
             vec3 q = p;
             q[a] += h[a] * .5;
-            vec3 u = sampleVelocity(q, step.readState);
+            vec3 u = velocityAtFace(i, a);
             vec3 mid = traceBack(q, q - u * step.dt * .5);
             vec3 back = traceBack(q, q - sampleVelocity(mid, step.readState) * step.dt);
             c.velocity[a] = sampleVelocity(back, step.readState)[a];
@@ -431,10 +474,51 @@ void main() {
     if (operation == 4) {
         rhs[id] = solidCell(i) ? 0 : (divergenceAt(i) - c.thermal.z) / step.dt;
         pressureA[id] = pressureB[id] = 0;
+        if (reusePressureStencil) {
+            vec3 negative = vec3(0), positive = vec3(0);
+            float diagonal = 0;
+            if (!solidCell(i))
+                for (int a = 0; a < 3; ++a)
+                    for (int sign = -1; sign <= 1; sign += 2) {
+                        ivec3 face = i;
+                        if (sign < 0)
+                            face[a]--;
+                        float coefficient =
+                            blockedFace(face, a) ? 0 : faceInverseDensity(face, a) / (h[a] * h[a]);
+                        if (sign < 0)
+                            negative[a] = coefficient;
+                        else
+                            positive[a] = coefficient;
+                        diagonal += coefficient;
+                    }
+            // The illumination cache is scratch until lighting runs. Reuse its
+            // two vec4s per cell; no new allocation or descriptor is required.
+            uint n = uint(dimensions().x * dimensions().y * dimensions().z);
+            volumeLight[id] = vec4(negative, diagonal);
+            volumeLight[id + n] = vec4(positive, 0);
+        }
         atomicMax(diagnostics[13], floatBitsToUint(abs(rhs[id] * step.dt)));
         return;
     }
     if (operation == 5) {
+        if (reusePressureStencil) {
+            uint n = uint(dimensions().x * dimensions().y * dimensions().z);
+            vec4 negative = volumeLight[id], positive = volumeLight[id + n];
+            float numerator = 0;
+            for (int a = 0; a < 3; ++a) {
+                ivec3 low = i, high = i;
+                low[a]--;
+                high[a]++;
+                numerator += negative[a] * pressureAt(low);
+                numerator += positive[a] * pressureAt(high);
+            }
+            float pressure = negative.w > 0 ? (numerator - rhs[id]) / negative.w : 0;
+            if (step.pressureRead == 0)
+                pressureB[id] = pressure;
+            else
+                pressureA[id] = pressure;
+            return;
+        }
         float numerator = 0, denominator = 0;
         for (int a = 0; a < 3; ++a)
             for (int sign = -1; sign <= 1; sign += 2) {

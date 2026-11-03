@@ -1,0 +1,80 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define VOLUME_WRITABLE
+#include "volume_common.glsl"
+// A two-cell halo makes two ordinary Jacobi iterations exact for the central
+// 8^3 cells. Input and final output remain separate global pressure buffers.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 4) in;
+layout(push_constant) uniform Step {
+    uint phase, readState, pressureRead, unused;
+    float dt, time;
+    uint padding0, padding1;
+}
+step;
+shared float oldPressure[1728]; // 12^3, including two-cell halo
+shared float midPressure[1000]; // 10^3, including one-cell halo
+shared vec4 negative[1000];
+shared vec4 positive[1000];
+shared float targetRhs[1000];
+ivec3 coordinate(uint i, int width) {
+    return ivec3(int(i) % width, (int(i) / width) % width, int(i) / (width * width));
+}
+uint index3(ivec3 p, int width) {
+    return uint((p.z * width + p.y) * width + p.x);
+}
+float inputPressure(ivec3 p) {
+    return outside(p) ? 0 : step.pressureRead == 0 ? pressureA[cellIndex(p)] : pressureB[cellIndex(p)];
+}
+void main() {
+    uint lane = gl_LocalInvocationIndex;
+    ivec3 origin = ivec3(gl_WorkGroupID) * 8;
+    uint n = uint(dimensions().x * dimensions().y * dimensions().z);
+    for (uint k = lane; k < 1728; k += 256)
+        oldPressure[k] = inputPressure(origin + coordinate(k, 12) - 2);
+    for (uint k = lane; k < 1000; k += 256) {
+        ivec3 p = origin + coordinate(k, 10) - 1;
+        if (outside(p)) {
+            negative[k] = positive[k] = vec4(0);
+            targetRhs[k] = 0;
+        } else {
+            uint id = cellIndex(p);
+            negative[k] = volumeLight[id];
+            positive[k] = volumeLight[id + n];
+            targetRhs[k] = rhs[id];
+        }
+    }
+    barrier();
+    for (uint k = lane; k < 1000; k += 256) {
+        ivec3 p = coordinate(k, 10) + 1;
+        float sum = 0;
+        for (int a = 0; a < 3; ++a) {
+            ivec3 low = p, high = p;
+            low[a]--;
+            high[a]++;
+            sum += negative[k][a] * oldPressure[index3(low, 12)];
+            sum += positive[k][a] * oldPressure[index3(high, 12)];
+        }
+        midPressure[k] = negative[k].w > 0 ? (sum - targetRhs[k]) / negative[k].w : 0;
+    }
+    barrier();
+    for (uint k = lane; k < 512; k += 256) {
+        ivec3 local = coordinate(k, 8), p = origin + local;
+        if (outside(p))
+            continue;
+        ivec3 mid = local + 1;
+        uint center = index3(mid, 10);
+        float sum = 0;
+        for (int a = 0; a < 3; ++a) {
+            ivec3 low = mid, high = mid;
+            low[a]--;
+            high[a]++;
+            sum += negative[center][a] * midPressure[index3(low, 10)];
+            sum += positive[center][a] * midPressure[index3(high, 10)];
+        }
+        float result = negative[center].w > 0 ? (sum - targetRhs[center]) / negative[center].w : 0;
+        if (step.pressureRead == 0)
+            pressureB[cellIndex(p)] = result;
+        else
+            pressureA[cellIndex(p)] = result;
+    }
+}

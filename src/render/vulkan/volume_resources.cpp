@@ -1,5 +1,6 @@
 #include "backend.hpp"
 #include "volume_state.hpp"
+#include <cstdlib>
 namespace one::vulkan {
 VolumeGpu::~VolumeGpu() {
     if (!device)
@@ -202,22 +203,39 @@ void Renderer::Impl::createHdrTargets() {
         sampler.magFilter = sampler.minFilter = VK_FILTER_NEAREST;
         check(vkCreateSampler(deviceState.device, &sampler, nullptr, &volumes.depthSampler),
               "scene depth sampler");
+        VkPhysicalDeviceProperties pressureDevice{};
+        vkGetPhysicalDeviceProperties(deviceState.physical, &pressureDevice);
+        bool tiled = pressureDevice.limits.maxComputeSharedMemorySize >= 46912 &&
+                     pressureDevice.limits.maxComputeWorkGroupInvocations >= 256 &&
+                     pressureDevice.limits.maxComputeWorkGroupSize[0] >= 8 &&
+                     pressureDevice.limits.maxComputeWorkGroupSize[1] >= 8 &&
+                     pressureDevice.limits.maxComputeWorkGroupSize[2] >= 4;
         for (bool light : {false, true}) {
             auto module = shader(light ? "volume_light.comp.spv" : "volume_sim.comp.spv");
             for (uint32_t operation : light ? std::vector<uint32_t>{0, 1}
-                                            : std::vector<uint32_t>{0, 1, 2, 3, 4, 5, 6, 9, 12, 13}) {
-                VkSpecializationMapEntry entry{0, 0, 4};
-                VkSpecializationInfo specialization{1, &entry, 4, &operation};
+                                            : std::vector<uint32_t>{0, 1, 2, 3, 4, 5, 6, 7, 9, 12, 13}) {
+                if (operation == 7 && !light && !tiled)
+                    continue;
+                auto pairedModule =
+                    !light && operation == 7 ? shader("volume_pressure.comp.spv") : VK_NULL_HANDLE;
+                const char* reference = std::getenv("THEONE_VOLUME_REFERENCE_SOLVER");
+                uint32_t reuse = !(reference && std::strcmp(reference, "1") == 0);
+                std::array<uint32_t, 3> values{operation, reuse, reuse};
+                std::array<VkSpecializationMapEntry, 3> entries{{{0, 0, 4}, {1, 4, 4}, {2, 8, 4}}};
+                VkSpecializationInfo specialization{uint32_t(entries.size()), entries.data(), sizeof(values),
+                                                    values.data()};
                 VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
                 ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
                 ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-                ci.stage.module = module;
+                ci.stage.module = pairedModule ? pairedModule : module;
                 ci.stage.pName = "main";
                 ci.stage.pSpecializationInfo = &specialization;
                 ci.layout = volumes.pipelineLayout;
                 auto result = vkCreateComputePipelines(deviceState.device, VK_NULL_HANDLE, 1, &ci, nullptr,
                                                        light ? &volumes.lightingPipeline[operation]
                                                              : &volumes.simulation[operation]);
+                if (pairedModule)
+                    vkDestroyShaderModule(deviceState.device, pairedModule, nullptr);
                 if (result != VK_SUCCESS) {
                     vkDestroyShaderModule(deviceState.device, module, nullptr);
                     check(result, "specialized volume pipeline");

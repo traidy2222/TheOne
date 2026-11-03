@@ -3,6 +3,7 @@
 #endif
 #ifdef VOLUME_WRITABLE
 #define VOLUME_ACCESS
+layout(constant_id = 2) const bool reuseConstrainedFaces = true;
 #else
 #define VOLUME_ACCESS readonly
 #endif
@@ -150,6 +151,12 @@ bool blockedFace(ivec3 i, int a) {
     return false;
 }
 float faceVelocity(ivec3 i, int axis, uint state) {
+#ifdef VOLUME_WRITABLE
+    // Every velocity-producing pass enforces the face boundary before storing.
+    // Outside/ghost faces still need the geometric boundary rule below.
+    if (reuseConstrainedFaces && !outside(i))
+        return stateCell(i, state).velocity[axis];
+#endif
     if (blockedFace(i, axis)) {
         vec3 p = cellPosition(i);
         p[axis] += spacing()[axis] * .5;
