@@ -1,4 +1,5 @@
 #pragma once
+#include <theone/lighting/stellar.hpp>
 #include <theone/render/camera.hpp>
 #include <theone/render/render_scene.hpp>
 #include <memory>
@@ -25,6 +26,8 @@ class Renderer {
     bool waitForFrame();
     void resize();
     void enableHdr(bool enabled);
+    void setStellarScene(const StellarScene& scene);
+    void clearStellarScene();
     void setLighting(const SceneLighting& lighting);
     void setVolumeScene(const VolumeScene& scene);
     void clearVolumes();

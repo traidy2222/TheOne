@@ -1,5 +1,6 @@
 #pragma once
 #include <theone/volumes/volume.hpp>
+#include <theone/lighting/stellar.hpp>
 #include <vulkan/vulkan.h>
 #include <array>
 #include <memory>
@@ -16,6 +17,9 @@ struct VolumeParameters {
     glm::vec4 initial;
     std::array<glm::vec4, 16> sourcePosition, sourceRates, sourceInterval, sourceVelocity;
     std::array<glm::vec4, 16> solidMin, solidMax, solidVelocity;
+    glm::vec4 stellarCounts;
+    std::array<glm::vec4, 4> starPositionRadius, starRadiance;
+    std::array<glm::vec4, 16> occultingSpheres;
 };
 static_assert(sizeof(VolumeCell) == 48);
 struct VolumePush {
@@ -46,6 +50,9 @@ struct HdrTarget {
     VkFramebuffer opaque = VK_NULL_HANDLE, composite = VK_NULL_HANDLE;
 };
 struct VolumeBackend {
+    bool stellarActive = false;
+    StellarScene stellarScene;
+    VkPipeline stellarSky = VK_NULL_HANDLE;
     bool hdr = false, active = false, initialize = true, obstaclesDirty = false;
     VolumeScene scene;
     SceneLighting lighting;

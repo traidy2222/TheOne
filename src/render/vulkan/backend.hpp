@@ -63,7 +63,7 @@ struct Renderer::Impl {
     void createVolumeBuffers();
     void retireVolumeBuffers();
     void updateVolumeDescriptors();
-    VkPipeline createVolumePostPipeline(VkRenderPass pass,bool output);
+    VkPipeline createVolumePostPipeline(VkRenderPass pass,bool output,bool stellarSky=false);
     void readVolumeDiagnostics(uint32_t slot);
     void prepareVolumes(uint32_t index,const Camera& camera,bool shadows);
     void recordVolumeSimulation(uint32_t index);

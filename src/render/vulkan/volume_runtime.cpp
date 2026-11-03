@@ -129,6 +129,25 @@ void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool s
     p.sunDirection = glm::vec4(v.lighting.sunDirection, d.initialTurbulenceRms);
     p.sunRadiance = glm::vec4(v.lighting.sunRadiance, 0);
     p.skyRadiance = glm::vec4(v.lighting.skyRadiance, d.initialTurbulenceScale);
+    if (v.stellarActive) {
+        const auto& stars = v.stellarScene;
+        p.stellarCounts = {float(stars.stars.size()), float(stars.occluders.size()), 1, 0};
+        p.sunRadiance = glm::vec4(0);
+        p.skyRadiance = glm::vec4(0, 0, 0, d.initialTurbulenceScale);
+        for (size_t i = 0; i < stars.stars.size(); ++i) {
+            const auto& star = stars.stars[i];
+            p.starPositionRadius[i] =
+                glm::vec4(glm::vec3((star.positionMetres - stars.originMetres) / stars.metresPerUnit),
+                          float(star.radiusMetres / stars.metresPerUnit));
+            p.starRadiance[i] = glm::vec4(glm::vec3(stellarBandRadiance(star)), 0);
+        }
+        for (size_t i = 0; i < stars.occluders.size(); ++i) {
+            const auto& b = stars.occluders[i];
+            p.occultingSpheres[i] =
+                glm::vec4(glm::vec3((b.positionMetres - stars.originMetres) / stars.metresPerUnit),
+                          float(b.radiusMetres / stars.metresPerUnit));
+        }
+    }
     p.ray = {v.scene.rayStepScale, float(v.scene.maximumRaySteps), v.lighting.exposure, shadows ? 1 : 0};
     p.lightVP = sceneState.cascades.matrices;
     p.splits = sceneState.cascades.splits;

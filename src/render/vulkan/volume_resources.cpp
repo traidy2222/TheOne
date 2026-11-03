@@ -63,9 +63,11 @@ void Renderer::Impl::createVolumeLayout() {
     check(vkCreatePipelineLayout(deviceState.device, &pl, nullptr, &volumes.surfaceLayout),
           "HDR surface pipeline layout");
 }
-VkPipeline Renderer::Impl::createVolumePostPipeline(VkRenderPass pass, bool output) {
-    auto vert = shader("volume_fullscreen.vert.spv"),
-         frag = shader(output ? "volume_output.frag.spv" : "volume_resolve.frag.spv");
+VkPipeline Renderer::Impl::createVolumePostPipeline(VkRenderPass pass, bool output, bool stellarSky) {
+    auto vert = shader(stellarSky ? "stellar_sky.vert.spv" : "volume_fullscreen.vert.spv"),
+         frag = shader(stellarSky ? "stellar_sky.frag.spv"
+                       : output   ? "volume_output.frag.spv"
+                                  : "volume_resolve.frag.spv");
     struct Modules {
         VkDevice d;
         VkShaderModule a, b;
@@ -95,6 +97,10 @@ VkPipeline Renderer::Impl::createVolumePostPipeline(VkRenderPass pass, bool outp
     VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    if (stellarSky) {
+        ds.depthTestEnable = VK_TRUE;
+        ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    }
     VkPipelineColorBlendAttachmentState attachment{};
     attachment.colorWriteMask = 15;
     VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
@@ -192,6 +198,7 @@ void Renderer::Impl::createHdrTargets() {
             for (int blend = 0; blend < 2; ++blend)
                 volumes.surfaces[mesh * 2 + blend] =
                     createGraphicsPipeline(false, blend != 0, mesh != 0, false, true);
+        volumes.stellarSky = createVolumePostPipeline(volumes.hdrPass, false, true);
         volumes.resolve = createVolumePostPipeline(volumes.compositePass, false);
         volumes.output = createVolumePostPipeline(targetsState.renderPass, true);
         VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -318,10 +325,10 @@ void Renderer::Impl::destroyHdrTargets(bool pipelines) {
             vkDestroyPipeline(deviceState.device, p, nullptr);
         p = VK_NULL_HANDLE;
     }
-    for (auto p : {volumes.resolve, volumes.output})
+    for (auto p : {volumes.resolve, volumes.output, volumes.stellarSky})
         if (p)
             vkDestroyPipeline(deviceState.device, p, nullptr);
-    volumes.resolve = volumes.output = VK_NULL_HANDLE;
+    volumes.resolve = volumes.output = volumes.stellarSky = VK_NULL_HANDLE;
     for (auto* array : {&volumes.simulation})
         for (auto& p : *array) {
             if (p)

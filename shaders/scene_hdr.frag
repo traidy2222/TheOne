@@ -11,6 +11,7 @@ layout(set = 0, binding = 0) uniform sampler2D baseTexture;
 #include "cascades.glsl"
 #define VOLUME_SET 2
 #include "volume_common.glsl"
+#include "stellar.glsl"
 layout(constant_id = 0) const bool volumeTransparent = false;
 layout(set = 0, binding = 3) uniform sampler2D metallicRoughnessTexture;
 layout(set = 0, binding = 4) uniform sampler2D normalTexture;
@@ -67,6 +68,8 @@ void main() {
     vec3 color = base.rgb * (vol.skyRadiance.xyz * ao + light.rgb / PI) +
                  ((1 - F) * (1 - metal) * base.rgb / PI + specular) * nl * vol.sunRadiance.xyz *
                      min(visibility, light.w);
+    if (vol.stellarCounts.z > .5)
+        color += stellarSurface(worldPosition, n, v, base.rgb, rough, metal, int(f.lighting.x) - 1);
     color += texture(emissiveTexture, texCoord).rgb * material.emissiveFactor.rgb;
     if (f.lighting.y > 0.5)
         color = base.rgb;
@@ -76,5 +79,5 @@ void main() {
         VolumeTransport v = integrateVolume(f.eyeTime.xyz, normalize(delta), length(delta));
         color = v.L + v.T * color;
     }
-    outColor = vec4(color * HDR_STORAGE_SCALE, base.a);
+    outColor = vec4(min(vec3(60000), color * HDR_STORAGE_SCALE), base.a);
 }

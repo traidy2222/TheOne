@@ -31,7 +31,7 @@ void Renderer::Impl::recordHdrScene(uint32_t index, const std::vector<Draw>& dra
     };
     auto beginPass = [&](VkRenderPass pass, VkFramebuffer fb, bool display) {
         std::array<VkClearValue, 2> clear{};
-        auto sky = volumes.lighting.skyRadiance * (.35f / 1024.f);
+        auto sky = volumes.stellarActive ? glm::vec3(0) : volumes.lighting.skyRadiance * (.35f / 1024.f);
         clear[0].color = {{display ? 0 : sky.x, display ? 0 : sky.y, display ? 0 : sky.z, 1}};
         clear[1].depthStencil = {1, 0};
         VkRenderPassBeginInfo b{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -58,10 +58,16 @@ void Renderer::Impl::recordHdrScene(uint32_t index, const std::vector<Draw>& dra
             const auto& material = resolvedMaterial(draw);
             vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, volumes.surfaceLayout, 0, 1,
                                     &material.sets[frameIndex], 0, nullptr);
+            int excluded = -1;
+            if (volumes.stellarActive)
+                for (size_t i = 0; i < volumes.stellarScene.occluders.size(); ++i)
+                    if (volumes.stellarScene.occluders[i].entity &&
+                        volumes.stellarScene.occluders[i].entity == draw.entity)
+                        excluded = int(i);
             Frame f{vp, glm::vec4(camera.position, time), m.color,
                     glm::vec4(m.roughness, m.metallic, m.mask ? m.cutoff : -1.f,
                               selected == draw.entity ? 1.f : 0.f),
-                    glm::vec4(1, m.unlit ? 1.f : 0.f, m.normalScale, m.occlusionStrength)};
+                    glm::vec4(float(excluded + 1), m.unlit ? 1.f : 0.f, m.normalScale, m.occlusionStrength)};
             vkCmdPushConstants(command, volumes.surfaceLayout,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(f), &f);
             issueGeometryDraw(draw, true);
@@ -74,6 +80,12 @@ void Renderer::Impl::recordHdrScene(uint32_t index, const std::vector<Draw>& dra
     };
     beginPass(volumes.hdrPass, target.opaque, false);
     surfaces(false);
+    if (volumes.stellarActive) {
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, volumes.stellarSky);
+        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, volumes.pipelineLayout, 0, 1, &set,
+                                0, nullptr);
+        vkCmdDraw(command, 3, 1, 0, 0);
+    }
     vkCmdEndRenderPass(command);
     if (frame().queries)
         vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, frame().queries, 10);
