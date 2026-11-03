@@ -1,0 +1,128 @@
+#include <theone/lighting/stellar.hpp>
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+namespace one {
+namespace {
+constexpr double pi = 3.14159265358979323846, sigma = 5.670374419e-8;
+void need(bool good, const char* text) {
+    if (!good)
+        throw std::invalid_argument(text);
+}
+bool finite(glm::dvec3 x) {
+    return std::isfinite(x.x) && std::isfinite(x.y) && std::isfinite(x.z);
+}
+void validate(const StellarEmitter& s) {
+    need(finite(s.positionMetres) && std::isfinite(s.radiusMetres) && s.radiusMetres > 0 &&
+             s.radiusMetres <= 1e15 && std::isfinite(s.kelvin) && s.kelvin >= 1000 && s.kelvin <= 10000 &&
+             std::isfinite(s.powerScale) && s.powerScale >= 0 && s.powerScale <= 10,
+         "Invalid stellar emitter");
+}
+} // namespace
+void validateStellarScene(const StellarScene& scene) {
+    need(finite(scene.originMetres) && std::isfinite(scene.metresPerUnit) && scene.metresPerUnit > 0,
+         "Invalid astronomical render origin/scale");
+    need(scene.stars.size() <= 4 && scene.occluders.size() <= 16,
+         "Stellar scene supports four emitters and sixteen opaque spheres");
+    auto renderable = [&](glm::dvec3 position, double radius) {
+        auto p = (position - scene.originMetres) / scene.metresPerUnit;
+        need(finite(p) && glm::all(glm::lessThanEqual(glm::abs(p), glm::dvec3(1e18))) &&
+                 radius / scene.metresPerUnit <= 1e18,
+             "Stellar coordinates exceed render range; choose an appropriate local origin and unit");
+    };
+    for (const auto& star : scene.stars) {
+        validate(star);
+        renderable(star.positionMetres, star.radiusMetres);
+    }
+    for (const auto& b : scene.occluders) {
+        need(finite(b.positionMetres) && std::isfinite(b.radiusMetres) && b.radiusMetres > 0,
+             "Invalid stellar occluder");
+        renderable(b.positionMetres, b.radiusMetres);
+    }
+}
+double stellarLuminosityWatts(const StellarEmitter& s) {
+    validate(s);
+    return 4 * pi * s.radiusMetres * s.radiusMetres * sigma * std::pow(s.kelvin, 4) * s.powerScale;
+}
+double stellarIrradianceWattsPerM2(const StellarEmitter& s, glm::dvec3 p) {
+    validate(s);
+    double distance = glm::length(p - s.positionMetres);
+    need(finite(p) && distance >= s.radiusMetres, "Irradiance probe must be outside the stellar surface");
+    double ratio = s.radiusMetres / distance;
+    return sigma * std::pow(s.kelvin, 4) * ratio * ratio * s.powerScale;
+}
+double stellarAngularRadius(const StellarEmitter& s, glm::dvec3 p) {
+    validate(s);
+    return std::asin(std::clamp(s.radiusMetres / glm::length(p - s.positionMetres), 0., 1.));
+}
+glm::dvec3 stellarBandRadiance(const StellarEmitter& s) {
+    validate(s);
+    glm::dvec3 result;
+    const double wavelengths[]{650e-9, 550e-9, 450e-9};
+    for (int a = 0; a < 3; ++a) {
+        double l = wavelengths[a];
+        result[a] = s.powerScale * 1.191042972e-16 /
+                    (std::pow(l, 5) * std::expm1(.01438776877 / (l * s.kelvin))) * 1e-7;
+    }
+    return result;
+}
+double stellarVisibility(const StellarScene& scene, size_t index, glm::dvec3 p, uint64_t exclude,
+                         uint32_t samples) {
+    validateStellarScene(scene);
+    need(index < scene.stars.size() && samples > 0 && samples <= 4096, "Invalid stellar visibility query");
+    const auto& star = scene.stars[index];
+    glm::dvec3 delta = star.positionMetres - p;
+    double distance = glm::length(delta);
+    need(distance > star.radiusMetres, "Visibility probe must be outside star");
+    auto axis = delta / distance;
+    auto tangent =
+        glm::normalize(glm::cross(axis, std::abs(axis.y) < .9 ? glm::dvec3(0, 1, 0) : glm::dvec3(1, 0, 0)));
+    auto bitangent = glm::cross(axis, tangent);
+    double r = star.radiusMetres / distance, cosine = std::sqrt(std::max(0., 1 - r * r)), visible = 0;
+    for (uint32_t i = 0; i < samples; ++i) {
+        double c = 1 - ((i + .5) / samples) * (r * r / (1 + cosine)), angle = i * 2.399963229728653;
+        auto direction = axis * c + (tangent * std::cos(angle) + bitangent * std::sin(angle)) *
+                                        std::sqrt(std::max(0., 1 - c * c));
+        auto perpendicularStar = glm::cross(delta, direction);
+        double end = glm::dot(delta, direction) -
+                     std::sqrt(std::max(0., star.radiusMetres * star.radiusMetres -
+                                                glm::dot(perpendicularStar, perpendicularStar)));
+        bool blocked = false;
+        for (size_t other = 0; other < scene.stars.size(); ++other) {
+            if (other == index)
+                continue;
+            const auto& occluder = scene.stars[other];
+            auto d = occluder.positionMetres - p;
+            double t = glm::dot(d, direction);
+            auto perpendicular = glm::cross(d, direction);
+            double discriminant =
+                occluder.radiusMetres * occluder.radiusMetres - glm::dot(perpendicular, perpendicular);
+            if (discriminant >= 0) {
+                double half = std::sqrt(discriminant);
+                if (t + half > 1e-8 && t - half < end) {
+                    blocked = true;
+                    break;
+                }
+            }
+        }
+        for (const auto& b : scene.occluders) {
+            if (exclude && b.entity == exclude)
+                continue;
+            auto d = b.positionMetres - p;
+            double t = glm::dot(d, direction);
+            auto perpendicular = glm::cross(d, direction);
+            double discriminant = b.radiusMetres * b.radiusMetres - glm::dot(perpendicular, perpendicular);
+            if (discriminant < 0)
+                continue;
+            double half = std::sqrt(discriminant);
+            if (t + half > 1e-8 && t - half < end) {
+                blocked = true;
+                break;
+            }
+        }
+        if (!blocked)
+            visible++;
+    }
+    return visible / samples;
+}
+} // namespace one
