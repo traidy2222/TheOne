@@ -33,7 +33,10 @@ int main(int argc,char** argv) {
         require(window!=nullptr,SDL_GetError());struct Window{SDL_Window* value;~Window(){SDL_DestroyWindow(value);}} guard{window};
         ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;require(ImGui_ImplSDL3_InitForVulkan(window),"UI initialization failed");
         struct UI{~UI(){ImGui_ImplSDL3_Shutdown();ImGui::DestroyContext();}} ui;
-        one::Renderer renderer;renderer.initialize(window,validation);one::Camera camera;
+        one::Renderer renderer;renderer.initialize(window,validation);
+        // This fixture asserts one palette entry per prepared transform. Instancing
+        // appends per-pass packed palettes and is checked by the shadow fixtures.
+        renderer.setInstancing(false);one::Camera camera;
         auto frame=[&] {SDL_PumpEvents();require(renderer.beginFrame(),"Frame unavailable");ImGui_ImplSDL3_NewFrame();ImGui::NewFrame();ImGui::Render();};
         std::vector<one::Vertex> vertices,dynamic;std::vector<one::Draw> draws,dynamicDraws;one::RenderScene scene;
         one::ParticleSystem particles;for(int i=0;i<80;++i)particles.step(1.f/60);
