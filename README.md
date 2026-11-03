@@ -50,6 +50,7 @@ planet-scale streaming, or a universal performance guarantee.
 - [Review of engine/game ownership](docs/ENGINE_GAME_BOUNDARY_REVIEW.md)
 - [Reactive smoke/fire: integration, model and limits](docs/VOLUMES.md)
 - [Finite stellar emitters and astronomical lighting](docs/STELLAR_LIGHTING.md)
+- [Resistive MHD solver and stellar plasma bridge](docs/RESISTIVE_MHD.md)
 - [Smoke, fire and fuel-explosion research design](docs/VOLUMETRIC_EFFECTS_DESIGN.md)
 - [Latest cache performance evidence and limitations](docs/CACHE_CORRECTION_PERFORMANCE.md)
 

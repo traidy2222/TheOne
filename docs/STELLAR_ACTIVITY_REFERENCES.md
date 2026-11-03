@@ -1,5 +1,9 @@
 # Procedural stellar activity
 
+This describes the procedural baseline. An optional
+[resistive MHD region](RESISTIVE_MHD.md) now replaces the prescribed arches and
+spicule overlays for its emitter, and supplies evolving density/temperature.
+
 The optional `StellarEmitter::activity` model adds an opaque photosphere and an
 optically thin, raymarched atmosphere. It is a procedural rendering model guided
 by solar observations. The four prescribed bipolar regions are not a simulated
