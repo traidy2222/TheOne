@@ -59,6 +59,16 @@ int main(int argc,char** argv) {
             if(test)require(renderer.geometryStats().uploadedGeometryBytes==0,"Unchanged GPU mesh reuploaded");
             require(renderer.geometryStats().uploadedPaletteBytes==scene.transforms.size()*sizeof(one::GeometryTransform),"Palette upload accounting failed");
         }
+        // The separate HDR vertex/shading contract must preserve actual skinned
+        // geometry, including nonuniform scale and animation, as well as planes.
+        renderer.enableHdr(true);
+        world.bake(.25f,vertices,draws);particles.bake(camera,vertices,draws);
+        frame();require(renderer.render(vertices,draws,camera,.25f,true,true,2),"HDR CPU render failed");
+        auto hdrCpu=capture();
+        world.prepare(.25f,scene);frame();
+        require(renderer.render(scene,dynamic,dynamicDraws,camera,.25f,true,true,2),"HDR GPU render failed");
+        compare(hdrCpu,capture());
+        renderer.enableHdr(false);
         // CPU fallback and persistent procedural geometry can alternate with GPU meshes.
         world.bake(.25f,vertices,draws);
         frame();renderer.renderCached(vertices,draws,1,camera,0,true);auto cached=capture();
