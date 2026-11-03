@@ -9,6 +9,8 @@ void main() {
     // Translation-free camera basis avoids cancellation in inverse VP at a star.
     vec3 right=normalize(cross(vol.forward.xyz,vec3(0,1,0)));
     vec3 up=cross(right,vol.forward.xyz);
+    float c=cos(vol.plasmaExtent.w),s=sin(vol.plasmaExtent.w);
+    vec3 rolledRight=right*c-up*s;up=up*c+right*s;right=rolledRight;
     vec2 ndc=uv*2-1;
     vec3 direction=normalize(vol.forward.xyz+vol.forward.w*(right*ndc.x*vol.eye.w-up*ndc.y)),color=vec3(0);
     float pixelArea = max(1e-14, length(cross(dFdx(direction), dFdy(direction))));
@@ -17,9 +19,10 @@ void main() {
         vec3 axis, tangent, bitangent;
         float oneMinusCos, omega;
         stellarCone(vol.eye.xyz, star, axis, tangent, bitangent, oneMinusCos, omega);
-        if (dot(axis, direction) <= 0)
+        if (dot(axis, direction) <= 0 && vol.starActivity[star].x<.5)
             continue;
         float angularRadius = asin(clamp(sqrt(oneMinusCos * (2 - oneMinusCos)), 0, 1));
+        if(dot(axis,direction)<=0 && angularRadius<=width*1.5)continue;
         float separation = asin(clamp(length(cross(axis, direction)), 0, 1)), coverage;
         if(vol.starActivity[star].x>.5 && angularRadius>width*1.5){
             float radius=vol.starPositionRadius[star].w;
@@ -31,12 +34,12 @@ void main() {
             if(mode==2 && separation<angularRadius*1.025)continue;
             float core=sphereEntry(vol.eye.xyz,direction,vol.starPositionRadius[star]);
             float clipping=activityOcclusion(vol.eye.xyz,direction,star)/radius;
-            float footprint=width*max(1.,length(ro)-1);
+            float footprint=width*max(.0001,length(ro)-1);
             vec3 surface=vec3(0);
             if(core>=0 && core/radius<clipping){
                 vec3 normal=normalize(ro+direction*(core/radius));
                 float mu=max(0,dot(normal,-direction));
-                surface=mode==1?activityEuvSurface(normal,star):activityPhotosphere(normal,mu,footprint,star);
+                surface=(mode==1||mode==3)?activityEuvSurface(normal,star):activityPhotosphere(normal,mu,footprint,star);
             }
             vec4 atmosphere=activityTransport(ro,direction,core<0?-1:core/radius,clipping,footprint,star,mode);
             color+=atmosphere.rgb+atmosphere.a*surface;

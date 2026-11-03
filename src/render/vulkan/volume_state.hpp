@@ -22,6 +22,7 @@ struct VolumeParameters {
     std::array<glm::vec4, 16> occultingSpheres;
     std::array<glm::vec4, 4> starActivity, starMotion, starAtmosphere;
     std::array<glm::vec4, 16> starRegionNormal, starRegionTangent;
+    glm::vec4 plasmaNormal, plasmaTangent, plasmaGrid, plasmaExtent;
 };
 static_assert(sizeof(VolumeCell) == 48);
 struct VolumePush {
@@ -38,7 +39,7 @@ struct VolumeGpu {
     VkDevice device = VK_NULL_HANDLE;
     glm::uvec3 resolution{};
     uint64_t bytes = 0;
-    std::array<VolumeBuffer, 2> cells, pressure, parameters, diagnostics;
+    std::array<VolumeBuffer, 2> cells, pressure, parameters, diagnostics, plasma;
     VolumeBuffer rhs, light, ledger;
     VkDescriptorPool pool = VK_NULL_HANDLE;
     std::array<std::vector<VkDescriptorSet>, 2> sets;

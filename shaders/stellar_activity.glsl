@@ -1,4 +1,7 @@
-// Observation-informed procedural plasma. Prescribed fields, not an MHD solver.
+// Procedural photosphere/background plus an optional density/temperature MHD snapshot.
+layout(std430, set = VOLUME_SET, binding = 13) readonly buffer StellarPlasma {
+    vec4 plasmaCells[];
+};
 uint activityHash(uint x) {
     x ^= x >> 16;
     x *= 0x7feb352du;
@@ -66,6 +69,8 @@ float activityLimb(float mu, int star) {
 void activityRegions(vec3 normal, int star, out float spot, out float facula) {
     spot = 0;
     facula = 0;
+    if (int(vol.plasmaNormal.w) == star + 1)
+        return;
     for (int j = 0; j < 4; ++j) {
         int index = star * 4 + j;
         vec3 n = vol.starRegionNormal[index].xyz, u = vol.starRegionTangent[index].xyz;
@@ -112,6 +117,8 @@ vec3 activityPhotosphere(vec3 normal, float mu, float footprint, int star) {
     return vol.starRadiance[star].rgb * local * activityLimb(mu, star);
 }
 vec3 activityEuvSurface(vec3 normal, int star) {
+    if (int(vol.plasmaNormal.w) == star + 1)
+        return vec3(0);
     vec3 n = activityFrame(normal, star);
     float spot, facula;
     activityRegions(n, star, spot, facula);
@@ -122,13 +129,57 @@ vec3 activityEuvSurface(vec3 normal, int star) {
     float activePatch = activityNoise(n * 13, seed + 51u);
     float brightness = .025 + .15 * pow(moss, 3) + .035 * fine + .22 * facula * (.4 + activePatch);
     float meanBand = dot(vol.starRadiance[star].rgb, vec3(.3333333));
-    return meanBand * vec3(1, .36, .06) * brightness * .15;
+    vec3 palette = int(vol.stellarCounts.w) == 3 ? vec3(1) : vec3(1, .36, .06);
+    return meanBand * palette * brightness * .15;
 }
 struct ActivityField {
     float electrons;
     float hotMeasure;
     float coolMeasure;
 };
+bool hasPlasma(int star) {
+    return int(vol.plasmaNormal.w) == star + 1;
+}
+float plasmaResponse(float temperature){
+    // Monochrome combines a broad range of coronal temperatures for inspection;
+    // colour mode retains the narrower illustrative 1.5 MK response.
+    float width=int(vol.stellarCounts.w)==3?1.8:.48;
+    return exp(-.5*pow(log(max(temperature,100.)/1.5e6)/width,2));
+}
+vec4 plasmaSample(vec2 coord) {
+    vec2 pixel = clamp(coord * vol.plasmaGrid.xy - .5, vec2(0), vol.plasmaGrid.xy - 1);
+    ivec2 a = ivec2(floor(pixel)), b = min(a + 1, ivec2(vol.plasmaGrid.xy) - 1);
+    vec2 f = fract(pixel);
+    int width = int(vol.plasmaGrid.x);
+    return mix(mix(plasmaCells[a.y * width + a.x], plasmaCells[a.y * width + b.x], f.x),
+               mix(plasmaCells[b.y * width + a.x], plasmaCells[b.y * width + b.x], f.x), f.y);
+}
+void plasmaField(vec3 p, inout ActivityField field) {
+    float scale = vol.plasmaTangent.w;
+    vec3 n = vol.plasmaNormal.xyz, u = vol.plasmaTangent.xyz, v = cross(n, u);
+    vec2 q = vec2(atan(dot(p, u), dot(p, n)), length(p) - 1) / scale;
+    vec2 coord = (q - vol.plasmaGrid.zw) / vol.plasmaExtent.xy;
+    if (any(lessThan(coord, vec2(0))) || any(greaterThan(coord, vec2(1))))
+        return;
+    float depth = dot(p, v) / scale / vol.plasmaExtent.z;
+    if (abs(depth) > 3.5)
+        return;
+    vec4 cell = plasmaSample(coord);
+    float density = cell.x / 4e14, temperature = cell.y;
+    float edge =
+        smoothstep(0, .04, coord.x) * smoothstep(0, .04, 1 - coord.x) * smoothstep(0, .06, 1 - coord.y);
+    float weight = exp(-.5 * depth * depth) * edge;
+    // Synthetic optically thin coronal response, not a calibrated atomic line table.
+    float response = plasmaResponse(temperature);
+    float cool = 1 - smoothstep(6e4, 1.8e5, temperature);
+    float ambient = cell.z / 4e14;
+    float ambientResponse = plasmaResponse(cell.w);
+    field.electrons = max(0, field.electrons + weight * (density - ambient));
+    field.hotMeasure =
+        max(0, field.hotMeasure +
+                   weight * .45 * (density * density * response - ambient * ambient * ambientResponse));
+    field.coolMeasure += density * density * cool * cool * weight;
+}
 // Gaussian cross sections convolved with pixel footprint and ray segment.
 // Density and emission measure are filtered separately: <n^2> is not <n>^2.
 vec2 activityTube(float planeDistance, float radialDistance, float width, float planeRay, float radialRay,
@@ -161,8 +212,19 @@ ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds
     field.electrons = quiet;
     field.hotMeasure = .025 * quiet * quiet;
     field.coolMeasure = 0;
+    if (hasPlasma(star)) {
+        float y = (radius - 1) / vol.plasmaTangent.w;
+        vec4 ambient = plasmaSample(vec2(.5, (y - vol.plasmaGrid.w) / vol.plasmaExtent.y));
+        if (ambient.z > 0) {
+            float top = 1 + (vol.plasmaGrid.w + vol.plasmaExtent.y) * vol.plasmaTangent.w;
+            float density = ambient.z / 4e14 * pow(max(1., radius / top), -6);
+            float response = plasmaResponse(ambient.w);
+            field.electrons = density;
+            field.hotMeasure = .45 * density * density * response;
+        }
+    }
     float strength = vol.starMotion[star].z, flow = vol.starAtmosphere[star].w;
-    for (int j = 0; j < 4; ++j) {
+    for (int j = 0; j < (hasPlasma(star) ? 0 : 4); ++j) {
         int index = star * 4 + j;
         vec3 axis = vol.starRegionNormal[index].xyz, u = vol.starRegionTangent[index].xyz, v = cross(axis, u);
         float a = vol.starRegionNormal[index].w, h = vol.starRegionTangent[index].w;
@@ -201,7 +263,7 @@ ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds
             }
         }
     }
-    if (height < .023) {
+    if (height < .023 && !hasPlasma(star)) {
         vec2 cells = activityCells(n * 70, vol.starMotion[star].x * .4, uint(vol.starMotion[star].w) + 901u);
         float core = pow(max(0, 1 - cells.x * 2.4), 5);
         float top = .004 + .01 * (.5 + .5 * sin(n.x * 311 + n.z * 257 + vol.starMotion[star].x * .6));
@@ -214,6 +276,8 @@ ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds
     field.electrons *= taper;
     field.hotMeasure *= taper;
     field.coolMeasure *= taper;
+    if (hasPlasma(star))
+        plasmaField(p, field);
     return field;
 }
 bool activityInterval(vec3 ro, vec3 rd, float radius, out float nearT, out float farT) {
@@ -262,9 +326,9 @@ void activityIntegrateRange(inout vec3 light, inout float transmission, vec3 ro,
         float radius = max(1, length(p));
         float sigma;
         vec3 source;
-        if (mode == 1) {
+        if (mode == 1 || mode == 3) {
             sigma = sqrt(max(0, f.coolMeasure)) * 35;
-            source = meanBand * vec3(1, .36, .06) * f.hotMeasure * .15;
+            source = meanBand * (mode == 3 ? vec3(1) : vec3(1, .36, .06)) * f.hotMeasure * .15;
         } else {
             sigma = tau * f.electrons;
             float q = 1 / radius;
@@ -294,10 +358,20 @@ vec4 activityTransport(vec3 ro, vec3 ray, float coreHit, float clipping, float f
         return vec4(light, transmission);
     int budget = int(vol.starAtmosphere[star].x);
     float thinLo, thinHi;
-    if (activityInterval(ro, ray, 1.023, thinLo, thinHi) && thinHi > lo && thinLo < hi) {
+    bool patchHit = false;
+    if (hasPlasma(star)) {
+        float scale = vol.plasmaTangent.w;
+        float halfX = max(abs(vol.plasmaGrid.z), abs(vol.plasmaGrid.z + vol.plasmaExtent.x));
+        float halfY = vol.plasmaExtent.y * .5;
+        vec3 centre = activityRotate(vol.plasmaNormal.xyz * (1 + (vol.plasmaGrid.w + halfY) * scale),
+                                     -activityAngle(vol.plasmaNormal.xyz, star));
+        float bound = scale * length(vec3(halfX, halfY, vol.plasmaExtent.z * 3.5));
+        patchHit = activityInterval(ro - centre, ray, bound, thinLo, thinHi) && thinHi > lo && thinLo < hi;
+    }
+    if (patchHit || (activityInterval(ro, ray, 1.023, thinLo, thinHi) && thinHi > lo && thinLo < hi)) {
         thinLo = clamp(thinLo, lo, hi);
         thinHi = clamp(thinHi, lo, hi);
-        int inner = min(20, budget / 3), outer = budget - inner;
+        int inner = patchHit ? budget * 3 / 4 : min(20, budget / 3), outer = budget - inner;
         float front = thinLo - lo, back = hi - thinHi;
         int frontCount = front + back > 1e-6 ? int(round(outer * front / (front + back))) : 0;
         activityIntegrateRange(light, transmission, ro, ray, lo, thinLo, frontCount, footprint, star, mode);

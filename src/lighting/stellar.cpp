@@ -36,7 +36,7 @@ void validate(const StellarEmitter& s) {
 } // namespace
 void validateStellarScene(const StellarScene& scene) {
     need(std::isfinite(scene.timeSeconds) && scene.timeSeconds >= 0 && scene.timeSeconds <= 1e9 &&
-             uint32_t(scene.view) <= 2,
+             uint32_t(scene.view) <= 3,
          "Invalid stellar activity clock/view");
     need(finite(scene.originMetres) && std::isfinite(scene.metresPerUnit) && scene.metresPerUnit > 0,
          "Invalid astronomical render origin/scale");
@@ -56,6 +56,29 @@ void validateStellarScene(const StellarScene& scene) {
         need(finite(b.positionMetres) && std::isfinite(b.radiusMetres) && b.radiusMetres > 0,
              "Invalid stellar occluder");
         renderable(b.positionMetres, b.radiusMetres);
+    }
+    if (scene.plasma) {
+        const auto& p = *scene.plasma;
+        need(p.emitter < scene.stars.size() && scene.stars[p.emitter].activity.enabled &&
+                 finite(glm::dvec3(p.normal)) && finite(glm::dvec3(p.tangent)) &&
+                 std::abs(glm::length(p.normal) - 1) < 1e-4 && std::abs(glm::length(p.tangent) - 1) < 1e-4 &&
+                 std::abs(glm::dot(p.normal, p.tangent)) < 1e-4 && std::isfinite(p.lengthMetres) &&
+                 p.lengthMetres >= scene.stars[p.emitter].radiusMetres * 1e-6 &&
+                 std::isfinite(p.halfDepthMetres) && p.halfDepthMetres >= p.lengthMetres * .001 &&
+                 p.lengthMetres / scene.stars[p.emitter].radiusMetres < .2 &&
+                 p.halfDepthMetres / p.lengthMetres < 2 && p.resolution.x >= 4 && p.resolution.y >= 4 &&
+                 p.resolution.x <= 128 && p.resolution.y <= 128 &&
+                 p.cells.size() == size_t(p.resolution.x) * p.resolution.y && std::isfinite(p.minimum.x) &&
+                 std::isfinite(p.minimum.y) && std::isfinite(p.extent.x) && std::isfinite(p.extent.y) &&
+                 p.extent.x > 0 && p.extent.y > 0 && p.extent.x <= 20 && p.extent.y <= 20 &&
+                 std::abs(p.minimum.x) <= 20 && std::abs(p.minimum.y) <= 20,
+             "Invalid stellar plasma patch");
+        for (const auto& cell : p.cells)
+            need(std::isfinite(cell.x) && cell.x >= 0 && cell.x <= 1e20 && std::isfinite(cell.y) &&
+                     cell.y >= 100 && cell.y <= 1e9 && std::isfinite(cell.z) && cell.z >= 0 &&
+                     cell.z <= 1e20 && std::isfinite(cell.w) && cell.w >= 0 && cell.w <= 1e9 &&
+                     (cell.z == 0 || cell.w >= 100),
+                 "Invalid plasma density/temperature");
     }
 }
 double stellarLuminosityWatts(const StellarEmitter& s) {

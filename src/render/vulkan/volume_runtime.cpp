@@ -167,6 +167,18 @@ void Renderer::Impl::prepareVolumes(uint32_t index, const Camera& camera, bool s
                           float(b.radiusMetres / stars.metresPerUnit));
         }
     }
+    if (v.stellarActive && v.stellarScene.plasma) {
+        const auto& patch = *v.stellarScene.plasma;
+        p.plasmaNormal = glm::vec4(patch.normal, float(patch.emitter + 1));
+        p.plasmaTangent = glm::vec4(
+            patch.tangent, float(patch.lengthMetres / v.stellarScene.stars[patch.emitter].radiusMetres));
+        p.plasmaGrid = {float(patch.resolution.x), float(patch.resolution.y), patch.minimum.x,
+                        patch.minimum.y};
+        p.plasmaExtent = {patch.extent.x, patch.extent.y, float(patch.halfDepthMetres / patch.lengthMetres),
+                          0};
+        std::memcpy(g.plasma[frameIndex].mapped, patch.cells.data(), patch.cells.size() * sizeof(glm::vec4));
+    }
+    p.plasmaExtent.w = camera.roll;
     p.ray = {v.scene.rayStepScale, float(v.scene.maximumRaySteps), v.lighting.exposure, shadows ? 1 : 0};
     p.lightVP = sceneState.cascades.matrices;
     p.splits = sceneState.cascades.splits;

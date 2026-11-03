@@ -207,6 +207,20 @@ int main() {
         auto occultedActivity = capture();
         need(occultedActivity[center] <= 1, "Foreground sphere failed to clip stellar plasma");
         scene.occluders.clear();
+        auto patch = std::make_shared<StellarPlasmaPatch>();
+        patch->resolution = {8, 8};
+        patch->cells.assign(64, glm::vec4(8e14f, 1.5e6f, 0, 0));
+        scene.plasma = patch;
+        scene.view = StellarView::EuvMonochrome;
+        lighting.exposure = 1e-6f;
+        renderer.setLighting(lighting);
+        auto hotPatch = capture();
+        for (auto& cell : patch->cells)
+            cell.y = 1.5e8f;
+        auto outOfBand = capture();
+        need(hotPatch[center] > outOfBand[center] + 10,
+             "MHD temperature snapshot did not drive coronal emission");
+        scene.plasma.reset();
         scene.stars[0].powerScale = 0;
         auto zero = capture();
         need(std::all_of(zero.begin(), zero.end(), [](unsigned char p) { return p <= 1; }),

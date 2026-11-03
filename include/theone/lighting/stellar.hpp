@@ -3,10 +3,20 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <memory>
 namespace one {
 inline constexpr double astronomicalUnitMetres = 149597870700.;
 inline constexpr double solarRadiusMetres = 695700000.;
-enum class StellarView : uint32_t { Visible, EuvDiagnostic, Coronagraph };
+enum class StellarView : uint32_t { Visible, EuvDiagnostic, Coronagraph, EuvMonochrome };
+struct StellarPlasmaPatch {
+    uint32_t emitter = 0;
+    glm::vec3 normal{0, 0, 1}, tangent{1, 0, 0};
+    double lengthMetres = 2e7, halfDepthMetres = 8e6;
+    glm::uvec2 resolution{0};
+    glm::vec2 minimum{-2, 0}, extent{4, 3};
+    // Cells: electron density [m^-3], temperature [K], ambient density/temperature.
+    std::vector<glm::vec4> cells;
+};
 struct StellarActivity {
     bool enabled = false;
     double granuleDiameterMetres = 1e6, granuleLifetimeSeconds = 600;
@@ -33,6 +43,7 @@ struct StellarScene {
     std::vector<StellarOccluder> occluders;
     double timeSeconds = 0;
     StellarView view = StellarView::Visible;
+    std::shared_ptr<const StellarPlasmaPatch> plasma;
 };
 void validateStellarScene(const StellarScene& scene);
 double stellarLuminosityWatts(const StellarEmitter& star);

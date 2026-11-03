@@ -15,7 +15,7 @@ VolumeGpu::~VolumeGpu() {
         if (b.memory)
             vkFreeMemory(device, b.memory, nullptr);
     };
-    for (auto* array : {&cells, &pressure, &parameters, &diagnostics})
+    for (auto* array : {&cells, &pressure, &parameters, &diagnostics, &plasma})
         for (auto& b : *array)
             destroy(b);
     destroy(rhs);
@@ -29,11 +29,11 @@ void Renderer::Impl::createVolumeLayout() {
         return;
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(deviceState.physical, &properties);
-    if (properties.limits.maxPerStageDescriptorStorageBuffers < 8 ||
-        properties.limits.maxDescriptorSetStorageBuffers < 9)
+    if (properties.limits.maxPerStageDescriptorStorageBuffers < 9 ||
+        properties.limits.maxDescriptorSetStorageBuffers < 10)
         throw std::runtime_error(
-            "HDR volumes require eight storage buffers per shader stage and nine per pipeline layout");
-    std::array<VkDescriptorSetLayoutBinding, 13> b{};
+            "HDR volumes require nine storage buffers per shader stage and ten per pipeline layout");
+    std::array<VkDescriptorSetLayoutBinding, 14> b{};
     for (uint32_t i = 0; i < b.size(); ++i) {
         auto type = i == 6             ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
                     : i >= 8 && i < 12 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
@@ -386,6 +386,9 @@ void Renderer::Impl::createVolumeBuffers() {
         buffer(g->parameters[slot], sizeof(vulkan::VolumeParameters),
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        buffer(g->plasma[slot], 128 * 128 * sizeof(glm::vec4),
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
         buffer(g->diagnostics[slot], 64 * 4,
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
@@ -410,7 +413,7 @@ void Renderer::Impl::updateVolumeDescriptors() {
     auto g = volumes.gpu;
     uint64_t count = uint64_t(g->resolution.x) * g->resolution.y * g->resolution.z;
     uint32_t sets = uint32_t(volumes.targets.size()) * 2;
-    std::array<VkDescriptorPoolSize, 3> sizes{{{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 8},
+    std::array<VkDescriptorPoolSize, 3> sizes{{{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 9},
                                                {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sets},
                                                {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sets * 4}}};
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -427,7 +430,7 @@ void Renderer::Impl::updateVolumeDescriptors() {
             a.pSetLayouts = &volumes.layout;
             check(vkAllocateDescriptorSets(deviceState.device, &a, &set), "volume frame descriptor");
             g->sets[slot].push_back(set);
-            std::array<VkDescriptorBufferInfo, 13> buffers{};
+            std::array<VkDescriptorBufferInfo, 14> buffers{};
             std::array<vulkan::VolumeBuffer*, 8> data{
                 &g->cells[0], &g->cells[1], &g->pressure[0],      &g->pressure[1],
                 &g->rhs,      &g->light,    &g->parameters[slot], &g->diagnostics[slot]};
@@ -437,8 +440,8 @@ void Renderer::Impl::updateVolumeDescriptors() {
                  {materialsState.shadowSampler, frames[slot].scene.shadowView,
                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL},
                  {volumes.sampler, t.resolvedView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
-            std::array<VkWriteDescriptorSet, 13> writes{};
-            for (uint32_t binding = 0; binding < 13; ++binding) {
+            std::array<VkWriteDescriptorSet, 14> writes{};
+            for (uint32_t binding = 0; binding < 14; ++binding) {
                 auto& w = writes[binding];
                 w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 w.dstSet = set;
@@ -447,12 +450,16 @@ void Renderer::Impl::updateVolumeDescriptors() {
                 w.descriptorType = binding == 6                   ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
                                    : binding >= 8 && binding < 12 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                                                                   : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                if (binding < 8 || binding == 12) {
-                    buffers[binding] = {binding == 12 ? g->ledger.buffer : data[binding]->buffer, 0,
-                                        binding == 12  ? count * 32
-                                        : binding < 2  ? count * sizeof(VolumeCell)
-                                        : binding < 5  ? count * 4
-                                        : binding == 5 ? count * 32 + uint64_t((g->resolution.x + 7) / 8) *
+                if (binding < 8 || binding >= 12) {
+                    buffers[binding] = {binding == 13   ? g->plasma[slot].buffer
+                                        : binding == 12 ? g->ledger.buffer
+                                                        : data[binding]->buffer,
+                                        0,
+                                        binding == 13   ? 128 * 128 * sizeof(glm::vec4)
+                                        : binding == 12 ? count * 32
+                                        : binding < 2   ? count * sizeof(VolumeCell)
+                                        : binding < 5   ? count * 4
+                                        : binding == 5  ? count * 32 + uint64_t((g->resolution.x + 7) / 8) *
                                                                           ((g->resolution.y + 7) / 8) *
                                                                           ((g->resolution.z + 7) / 8) * 48
                                         : binding == 6 ? sizeof(vulkan::VolumeParameters)
@@ -461,7 +468,7 @@ void Renderer::Impl::updateVolumeDescriptors() {
                 } else
                     w.pImageInfo = &images[binding - 8];
             }
-            vkUpdateDescriptorSets(deviceState.device, 13, writes.data(), 0, nullptr);
+            vkUpdateDescriptorSets(deviceState.device, 14, writes.data(), 0, nullptr);
         }
 }
 } // namespace one
