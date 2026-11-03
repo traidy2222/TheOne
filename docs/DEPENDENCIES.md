@@ -14,6 +14,6 @@ The engine uses these upstream projects rather than implementing their subsystem
 | GLM | 1.0.1, archive hash pinned | Math | copying.txt |
 | Assimp | 5.4.3 / c35200e | Asset converter | Assimp LICENSE, including bundled notices |
 
-Assimp also builds bundled zlib and supporting libraries; SDL includes supporting platform code. The package script collects license/copying notices from fetched sources into its `licenses` directory while retaining relative paths. Upstream project URLs are encoded in the CMake download URLs.
+Assimp also builds bundled zlib and supporting libraries; SDL includes supporting platform code. The source SDK keeps dependency references in `cmake/Dependencies.cmake`; dependencies are fetched separately when configured. Redistributed dependency binaries or sources require their corresponding upstream notices. Upstream project URLs are encoded in the CMake download URLs.
 
 The default level, robot, crate, checker textures, particle image, conversion fixture, and interaction sound are generated locally by this project. The optional Khronos compatibility files have separate upstream metadata preserved under `build/external`; they are excluded from the normal runtime package.

@@ -138,3 +138,20 @@ in [reload and renderer caches](RELOAD_CACHE_PERFORMANCE.md).
 
 The follow-up [cache correction](CACHE_CORRECTION_PERFORMANCE.md) documents
 same-run shadow comparisons, generation-based invalidation and repeated reloads.
+
+
+## Shared scene editing and prepared-scene reuse
+
+`TheOne::Scene` owns `EditorHistory` in `theone/scene/editor_history.hpp`.
+It stores bounded entity deltas, coalesces an application gesture into one
+transaction and reports whether an edit affects collision. Applications own
+UI gestures, simulation policy and retirement of old history containers.
+
+`TheOne::Physics` owns `reuseSceneAssets` in `theone/physics/scene_reuse.hpp`.
+Call it on a prepared `PhysicsScene` before publication. It returns obsolete
+live models for renderer invalidation and keeps discarded fresh models in the
+prepared scene for worker retirement. The application chooses whether reuse is
+enabled, then coordinates invalidation and `swapInto`.
+
+Focused checks: `engine_editor_history` and `engine_scene_reuse`. Both run
+without a GPU window. See [ownership review](ENGINE_GAME_BOUNDARY_REVIEW.md).
