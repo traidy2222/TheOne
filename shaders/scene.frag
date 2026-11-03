@@ -1,13 +1,14 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 layout(location=0) in vec3 worldPosition;
 layout(location=1) in vec3 worldNormal;
 layout(location=2) in vec4 vertexColor;
 layout(location=3) in vec2 texCoord;
-layout(location=4) in vec4 shadowCoord;
+
 layout(location=0) out vec4 outColor;
 layout(set=0,binding=0) uniform sampler2D baseTexture;
-layout(set=0,binding=1) uniform Scene { mat4 lightVP; vec4 lightDirection; vec4 options; } scene;
-layout(set=0,binding=2) uniform sampler2DShadow shadowMap;
+#include "scene_uniform.glsl"
+#include "cascades.glsl"
 layout(set=0,binding=3) uniform sampler2D metallicRoughnessTexture;
 layout(set=0,binding=4) uniform sampler2D normalTexture;
 layout(set=0,binding=5) uniform sampler2D occlusionTexture;
@@ -35,12 +36,18 @@ void main() {
     float k=(rough+1)*(rough+1)/8; float G=nv/(nv*(1-k)+k)*nl/(nl*(1-k)+k);
     vec3 F0=mix(vec3(0.04),base.rgb,metal),F=F0+(1-F0)*pow(1-vh,5);
     vec3 specular=D*G*F/(4*nv*max(nl,0.001)+0.0001);
-    vec3 p=shadowCoord.xyz/shadowCoord.w; vec2 uv=p.xy*0.5+0.5; float visibility=1;
-    if(scene.options.x>0 && p.z>0 && p.z<1 && all(greaterThanEqual(uv,vec2(0))) && all(lessThanEqual(uv,vec2(1)))) {
-        visibility=0; float bias=max(0.0006*(1-nl),0.00015);
-        for(int x=-1;x<=1;++x) for(int y=-1;y<=1;++y) visibility+=texture(shadowMap,vec3(uv+vec2(x,y)/2048.0,p.z-bias))/9;
-    }
+    float visibility=shadowVisibility(worldPosition,f.eyeTime.xyz,nl);
     float ao=mix(1,texture(occlusionTexture,texCoord).r,f.lighting.w);
+    if(scene.options.y>0.5) {
+        // Converted legacy assets carry painted textures and vertex colors.
+        // Preserve their contrast instead of applying the sandbox's
+        // PBR exposure compression and heavy distance fog.
+        vec3 legacy=base.rgb*(f.lighting.y>0.5?1.0:(0.7+0.3*nl*visibility))*ao;
+        legacy+=texture(emissiveTexture,texCoord).rgb*material.emissiveFactor.rgb;
+        legacy=mix(legacy,vec3(1,0.55,0.07),f.params.w*0.04);
+        if(f.lighting.x<0.5)legacy=pow(max(legacy,vec3(0)),vec3(1.0/2.2));
+        outColor=vec4(legacy,base.a); return;
+    }
     vec3 color=base.rgb*0.15*ao+((1-F)*(1-metal)*base.rgb/PI+specular)*nl*3.0*visibility;
     color+=texture(emissiveTexture,texCoord).rgb*material.emissiveFactor.rgb;
     if(f.lighting.y>0.5)color=base.rgb;

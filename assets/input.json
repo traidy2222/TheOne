@@ -1,5 +1,0 @@
-{
-  "forward": "W", "back": "S", "left": "A", "right": "D",
-  "ascend": "E", "descend": "Q", "fast": "Left Shift",
-  "jump": "Space", "interact": "F"
-}

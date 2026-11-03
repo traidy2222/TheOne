@@ -1,6 +1,6 @@
 # Dependency provenance
 
-The engine uses these upstream projects rather than implementing their subsystems from scratch. CMake pins the downloaded archive contents with SHA-256 hashes. See `CMakeLists.txt` for exact commits/tags and hashes. Unmodified sources remain under ignored `build/_deps`.
+The engine uses these upstream projects rather than implementing their subsystems from scratch. CMake pins the downloaded archive contents with SHA-256 hashes. See `cmake/Dependencies.cmake` for exact commits/tags and hashes. Unmodified sources remain under ignored `build/_deps`.
 
 | Project | Version / pin | Purpose | Main notice |
 | --- | --- | --- | --- |
@@ -10,6 +10,7 @@ The engine uses these upstream projects rather than implementing their subsystem
 | cgltf | 1.15 / bbeb5b0 | glTF parsing | cgltf LICENSE |
 | stb | 003501f | Image decoding | stb LICENSE |
 | nlohmann/json | 3.12.0, archive hash pinned | JSON scenes/reports | LICENSE.MIT |
+| meshoptimizer | 0.23 / 3e9d1ff, archive hash pinned | Seam-preserving, attribute-aware static mesh LOD | LICENSE.md (MIT) |
 | GLM | 1.0.1, archive hash pinned | Math | copying.txt |
 | Assimp | 5.4.3 / c35200e | Asset converter | Assimp LICENSE, including bundled notices |
 
