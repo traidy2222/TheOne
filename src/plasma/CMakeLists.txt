@@ -1,0 +1,7 @@
+add_library(one_plasma STATIC mhd.cpp)
+target_link_libraries(one_plasma PUBLIC one_core)
+find_package(OpenMP QUIET)
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(one_plasma PRIVATE OpenMP::OpenMP_CXX)
+endif()
+add_library(TheOne::Plasma ALIAS one_plasma)

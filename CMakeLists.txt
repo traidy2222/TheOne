@@ -18,6 +18,7 @@ add_subdirectory(src/physics)
 add_subdirectory(src/input)
 add_subdirectory(src/effects)
 add_subdirectory(src/lighting)
+add_subdirectory(src/plasma)
 add_subdirectory(src/volumes)
 add_subdirectory(src/render)
 
