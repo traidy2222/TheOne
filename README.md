@@ -48,6 +48,7 @@ planet-scale streaming, or a universal performance guarantee.
 - [Game integration boundary](docs/PORTING.md)
 - [Dependencies and provenance](docs/DEPENDENCIES.md)
 - [Review of engine/game ownership](docs/ENGINE_GAME_BOUNDARY_REVIEW.md)
+- [Smoke, fire and fuel-explosion design](docs/VOLUMETRIC_EFFECTS_DESIGN.md) (design; not implemented)
 - [Latest cache performance evidence and limitations](docs/CACHE_CORRECTION_PERFORMANCE.md)
 
 Historical benchmark documents describe their own source versions, fixtures and
