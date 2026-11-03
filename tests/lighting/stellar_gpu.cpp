@@ -132,6 +132,13 @@ int main() {
         scene.stars[0].positionMetres.x = 1e18;
         auto rebased = capture();
         need(rebased == small, "Astronomical origin rebasing changed the rendered star");
+        scene.originMetres = {0, 0, 0};
+        scene.stars[0].positionMetres = {-4, 2, -10};
+        auto offAxis = capture();
+        size_t offAxisCount = 0;
+        for (size_t p = 0; p < offAxis.size(); p += 3)
+            offAxisCount += offAxis[p] > 220;
+        need(offAxisCount > 10, "An off-axis star incorrectly occluded its own photosphere");
         renderer.clearStellarScene();
         renderer.close();
         need(renderer.errors() == 0, "Stellar Vulkan synchronization validation failed");

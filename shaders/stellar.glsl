@@ -9,8 +9,10 @@ float sphereEntry(vec3 point, vec3 direction, vec4 sphere) {
     float halfChord = sqrt(discriminant);
     return t + halfChord > 0 ? max(0, t - halfChord) : -1;
 }
-bool stellarBlocked(vec3 point, vec3 direction, float end, int excluded) {
+bool stellarBlocked(vec3 point, vec3 direction, float end, int excluded, int emitter) {
     for (int star = 0; star < int(vol.stellarCounts.x); ++star) {
+        if (star == emitter)
+            continue;
         float hit = sphereEntry(point, direction, vol.starPositionRadius[star]);
         if (hit >= 0 && hit < end)
             return true;
@@ -58,7 +60,7 @@ vec3 stellarSurface(vec3 point, vec3 n, vec3 v, vec3 base, float rough, float me
             if (nl <= 0)
                 continue;
             float end = sphereEntry(point, l, vol.starPositionRadius[star]);
-            if (end < 0 || stellarBlocked(point, l, end, excluded))
+            if (end < 0 || stellarBlocked(point, l, end, excluded, star))
                 continue;
             vec3 h = normalize(v + l);
             float nh = max(0, dot(n, h)), vh = max(0, dot(v, h));

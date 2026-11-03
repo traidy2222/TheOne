@@ -25,7 +25,7 @@ void main() {
                 min(1, omega / (2 * STELLAR_PI * variance) * exp(-.5 * separation * separation / variance));
         }
         float end = sphereEntry(vol.eye.xyz, axis, vol.starPositionRadius[star]);
-        if (stellarBlocked(vol.eye.xyz, direction, max(0, end), -1))
+        if (stellarBlocked(vol.eye.xyz, direction, max(0, end), -1, star))
             coverage = 0;
         color += vol.starRadiance[star].rgb * coverage;
     }
