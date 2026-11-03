@@ -214,3 +214,9 @@ set_target_properties(theone_scene_reuse PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 add_test(NAME engine_scene_reuse COMMAND theone_scene_reuse "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/assets/sandbox.one")
 set_tests_properties(engine_scene_reuse PROPERTIES TIMEOUT 30)
 
+
+add_executable(theone_volume_reference volumes/reference.cpp)
+target_link_libraries(theone_volume_reference PRIVATE TheOne::Volumes)
+set_target_properties(theone_volume_reference PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+add_test(NAME engine_volume_reference COMMAND theone_volume_reference)
+
