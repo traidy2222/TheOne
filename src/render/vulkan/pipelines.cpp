@@ -1,13 +1,15 @@
 #include "backend.hpp"
 namespace one {
-VkPipeline Renderer::Impl::createGraphicsPipeline(bool shadow, bool blend, bool mesh, bool mask) {
-    VkShaderModule vert = shader(mask ? (mesh ? "mesh_shadow_mask.vert.spv" : "shadow_mask.vert.spv") : mesh ? (shadow ? "mesh_shadow.vert.spv" : "mesh.vert.spv")
-                                      : (shadow ? "shadow.vert.spv" : "scene.vert.spv")),
+VkPipeline Renderer::Impl::createGraphicsPipeline(bool shadow, bool blend, bool mesh, bool mask, bool hdr) {
+    VkShaderModule vert = shader(hdr    ? (mesh ? "mesh_hdr.vert.spv" : "scene_hdr.vert.spv")
+                                 : mask ? (mesh ? "mesh_shadow_mask.vert.spv" : "shadow_mask.vert.spv")
+                                 : mesh ? (shadow ? "mesh_shadow.vert.spv" : "mesh.vert.spv")
+                                        : (shadow ? "shadow.vert.spv" : "scene.vert.spv")),
                    frag = VK_NULL_HANDLE;
     VkPipeline result = VK_NULL_HANDLE;
     try {
         if (!shadow || mask)
-            frag = shader(mask ? "shadow_mask.frag.spv" : "scene.frag.spv");
+            frag = shader(hdr ? "scene_hdr.frag.spv" : mask ? "shadow_mask.frag.spv" : "scene.frag.spv");
         std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
         for (auto& s : stages) {
             s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -17,6 +19,11 @@ VkPipeline Renderer::Impl::createGraphicsPipeline(bool shadow, bool blend, bool 
         stages[0].module = vert;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         stages[1].module = frag;
+        VkBool32 transparent = blend;
+        VkSpecializationMapEntry entry{0, 0, sizeof(transparent)};
+        VkSpecializationInfo specialize{1, &entry, sizeof(transparent), &transparent};
+        if (hdr)
+            stages[1].pSpecializationInfo = &specialize;
         VkVertexInputBindingDescription binding{
             0, static_cast<uint32_t>(mesh ? sizeof(one::SkinVertex) : sizeof(one::Vertex)),
             VK_VERTEX_INPUT_RATE_VERTEX};
@@ -83,8 +90,10 @@ VkPipeline Renderer::Impl::createGraphicsPipeline(bool shadow, bool blend, bool 
         p.pDepthStencilState = &ds;
         p.pColorBlendState = &cb;
         p.pDynamicState = &dy;
-        p.layout = sceneState.pipelineLayout;
-        p.renderPass = shadow ? sceneState.shadowPass : targetsState.renderPass;
+        p.layout = hdr ? volumes.surfaceLayout : sceneState.pipelineLayout;
+        p.renderPass = shadow ? sceneState.shadowPass
+                       : hdr  ? (blend ? volumes.compositePass : volumes.hdrPass)
+                              : targetsState.renderPass;
         check(vkCreateGraphicsPipelines(deviceState.device, VK_NULL_HANDLE, 1, &p, nullptr, &result),
               "create graphics pipeline");
     } catch (...) {

@@ -14,6 +14,60 @@ bool Renderer::beginFrame() {
 bool Renderer::waitForFrame() {
     return impl_->waitForFrame();
 }
+void Renderer::enableHdr(bool enabled) {
+    impl_->volumes.hdr = enabled;
+}
+void Renderer::setLighting(const SceneLighting& lighting) {
+    if (!std::isfinite(lighting.exposure) || lighting.exposure <= 0 ||
+        glm::length(lighting.sunDirection) < .001f)
+        throw std::invalid_argument("Invalid lighting");
+    for (int a = 0; a < 3; ++a)
+        if (!std::isfinite(lighting.sunDirection[a]) || !std::isfinite(lighting.sunRadiance[a]) ||
+            lighting.sunRadiance[a] < 0 || !std::isfinite(lighting.skyRadiance[a]) ||
+            lighting.skyRadiance[a] < 0)
+            throw std::invalid_argument("Invalid lighting");
+    impl_->volumes.lighting = lighting;
+    impl_->volumes.lighting.sunDirection = glm::normalize(lighting.sunDirection);
+}
+void Renderer::setVolumeScene(const VolumeScene& scene) {
+    validateVolumeScene(scene);
+    auto& v = impl_->volumes;
+    if (!v.active || v.scene.generation != scene.generation ||
+        v.scene.domain.resolution != scene.domain.resolution ||
+        v.scene.domain.origin != scene.domain.origin || v.scene.domain.extent != scene.domain.extent ||
+        scene.timeSeconds + 1e-6 < v.simulated) {
+        v.initialize = true;
+        v.simulated = 0;
+        v.stats = {};
+        for (auto& f : impl_->frames)
+            f.volumeQueryWritten = false;
+    }
+    if (v.scene.obstacles.size() != scene.obstacles.size() ||
+        !std::equal(v.scene.obstacles.begin(), v.scene.obstacles.end(), scene.obstacles.begin(),
+                    scene.obstacles.end(), [](const auto& a, const auto& b) {
+                        return a.minimum == b.minimum && a.maximum == b.maximum && a.velocity == b.velocity;
+                    }))
+        v.obstaclesDirty = true;
+    v.scene = scene;
+    v.active = true;
+    v.hdr = true;
+}
+void Renderer::clearVolumes() {
+    auto& v = impl_->volumes;
+    v.active = false;
+    v.initialize = true;
+    v.simulated = 0;
+    v.stats = {};
+    impl_->retireVolumeBuffers();
+    for (auto& f : impl_->frames)
+        f.volumeQueryWritten = false;
+}
+const VolumeStats& Renderer::volumeStats() const {
+    return impl_->volumes.stats;
+}
+VolumeReadback Renderer::captureVolumeState() {
+    return impl_->captureVolumeState();
+}
 void Renderer::resize() {
     impl_->swapchainState.resizeRequested = true;
 }

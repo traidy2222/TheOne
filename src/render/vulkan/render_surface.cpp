@@ -24,6 +24,7 @@ void Renderer::Impl::createSurfaceTargets() {
     }
 }
 void Renderer::Impl::destroySurfaceTargets() {
+    destroyHdrTargets(false);
     for (auto f : targetsState.framebuffers)
         vkDestroyFramebuffer(deviceState.device, f, nullptr);
     targetsState.framebuffers.clear();

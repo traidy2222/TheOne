@@ -46,6 +46,7 @@ void Renderer::Impl::close() {
         preparation.meshes.clear();
         cancelUploads();
         destroySwapchain();
+        if(volumes.gpu)retireVolumeBuffers();
         destroySharedResources();
         destroyFrameResources();
         completed=submitted;collectRetired(true);

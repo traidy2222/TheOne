@@ -5,6 +5,9 @@ target_link_libraries(one_ui PUBLIC SDL3::SDL3-static Vulkan::Vulkan)
 # Backend translation units are private; the public Renderer header is Vulkan-free.
 add_library(one_renderer STATIC
   renderer.cpp
+  vulkan/volume_resources.cpp
+  vulkan/volume_runtime.cpp
+  vulkan/hdr_pass.cpp
   spatial_regions.cpp
   vulkan/asset_owners.cpp
   vulkan/backend.cpp
@@ -60,5 +63,5 @@ add_library(one_renderer STATIC
   vulkan/swapchain.cpp
 )
 target_include_directories(one_renderer PRIVATE "${THEONE_SOURCE_DIR}/src")
-target_link_libraries(one_renderer PUBLIC one_core one_ui PRIVATE one_geometry)
+target_link_libraries(one_renderer PUBLIC one_core one_ui PRIVATE one_geometry one_volumes)
 

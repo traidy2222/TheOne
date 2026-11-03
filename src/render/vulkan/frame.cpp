@@ -121,6 +121,7 @@ bool Renderer::Impl::draw(const std::vector<one::Vertex>& vertices, const std::v
         vkCmdResetQueryPool(frame().command, frame().queries, 0, 4);
         vkCmdWriteTimestamp(frame().command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, frame().queries, 0);
     }
+    if(volumes.hdr){prepareVolumes(index,camera,shadows);recordVolumeSimulation(index);}
     recordScene(index, ordered, camera, time, capture, shadows, selected, scene);
     if (frame().queries)
         vkCmdWriteTimestamp(frame().command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame().queries, 3);

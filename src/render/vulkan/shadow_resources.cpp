@@ -47,14 +47,14 @@ void Renderer::Impl::destroyFrameSceneResources() {
 }
 void Renderer::Impl::updateUniform(bool shadows, bool classicColor, const Camera& camera) {
     sceneState.cascades = fitShadowCascades(
-        camera, float(swapchainState.extent.width) / swapchainState.extent.height, shadowDistance);
+        camera, float(swapchainState.extent.width) / swapchainState.extent.height, shadowDistance, volumes.lighting.sunDirection);
     for (uint32_t c = 0; c < shadowCascadeCount; ++c) {
         const auto matrix = glm::transpose(sceneState.cascades.matrices[c]);
         shadowTexelsPerUnit[c] =
             .5f * shadowResolution *
             std::max(glm::length(glm::vec3(matrix[0])), glm::length(glm::vec3(matrix[1])));
     }
-    SceneUniform u{sceneState.cascades.matrices, glm::vec4(glm::normalize(glm::vec3(-20, 35, 18)), 0),
+    SceneUniform u{sceneState.cascades.matrices, glm::vec4(volumes.lighting.sunDirection, 0),
                    glm::vec4(shadows ? 1.f : 0.f, classicColor ? 1.f : 0.f, float(shadowResolution), 0),
                    sceneState.cascades.splits, glm::vec4(camera.forward(), 0)};
     void* p = nullptr;

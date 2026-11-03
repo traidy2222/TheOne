@@ -46,6 +46,7 @@
 #include "render/draw_order_cache.hpp"
 #include "render/draw_scratch.hpp"
 #include "shadow_mask_state.hpp"
+#include "volume_state.hpp"
 namespace one {
 namespace vulkan { struct PresentationPacing; struct ImageMemorySnapshot; struct ShadowSubmission; }
 inline void check(VkResult result, const char* operation) {
@@ -55,6 +56,22 @@ inline void check(VkResult result, const char* operation) {
 }
 // Coordinates backend state and lifecycle; function bodies live in responsibility-specific .cpp files.
 struct Renderer::Impl {
+    vulkan::VolumeBackend volumes;
+    void createVolumeLayout();
+    void createHdrTargets();
+    void destroyHdrTargets(bool pipelines);
+    void createVolumeBuffers();
+    void retireVolumeBuffers();
+    void updateVolumeDescriptors();
+    VkPipeline createVolumePostPipeline(VkRenderPass pass,bool output);
+    void readVolumeDiagnostics(uint32_t slot);
+    void prepareVolumes(uint32_t index,const Camera& camera,bool shadows);
+    void recordVolumeSimulation(uint32_t index);
+    void recordVolumeLighting(uint32_t index);
+    void volumeBarrier();
+    VolumeReadback captureVolumeState();
+    void recordHdrScene(uint32_t index,const std::vector<Draw>& draws,const Camera& camera,float time,bool shadows,uint64_t selected,const RenderScene* scene);
+    void finishSurface(uint32_t index,bool capture);
     Impl();
     ~Impl();
     using Texture = vulkan::Texture;
@@ -184,7 +201,7 @@ struct Renderer::Impl {
     void destroyRenderTargets();
     void createSurfaceTargets();
     void destroySurfaceTargets();
-    VkPipeline createGraphicsPipeline(bool shadow, bool blend, bool mesh = false, bool mask = false);
+    VkPipeline createGraphicsPipeline(bool shadow, bool blend, bool mesh = false, bool mask = false, bool hdr = false);
     void recordScene(uint32_t index, const std::vector<one::Draw>& draws, const one::Camera& camera,
                      float time, bool capture, bool shadows, uint64_t selected, const RenderScene* scene);
     void verifyCapture();

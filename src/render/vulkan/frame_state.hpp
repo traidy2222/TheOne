@@ -13,6 +13,7 @@ struct StagedUpload {
     void* mapped = nullptr;
 };
 struct FrameContext {
+    bool volumeQueryWritten=false;
     std::vector<StagedUpload> uploads;
     VkCommandBuffer command = VK_NULL_HANDLE;
     VkSemaphore acquired = VK_NULL_HANDLE;

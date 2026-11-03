@@ -4,6 +4,7 @@ namespace one {
 void Renderer::Impl::recordScene(uint32_t index, const std::vector<one::Draw>& draws,
                                  const one::Camera& camera, float time, bool capture, bool shadows,
                                  uint64_t selected, const RenderScene* scene) {
+    if(volumes.hdr){recordHdrScene(index,draws,camera,time,shadows,selected,scene);finishSurface(index,capture);return;}
     geometryState.boundBuffer = VK_NULL_HANDLE;
     const auto cameraVP =
         camera.projection(float(swapchainState.extent.width) / swapchainState.extent.height) * camera.view();
@@ -97,6 +98,9 @@ void Renderer::Impl::recordScene(uint32_t index, const std::vector<one::Draw>& d
     vkCmdEndRenderPass(frame().command);
     if (frame().queries)
         vkCmdWriteTimestamp(frame().command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, frame().queries, 2);
+    finishSurface(index,capture);
+}
+void Renderer::Impl::finishSurface(uint32_t index,bool capture) {
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.image = swapchainState.images[index];
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};

@@ -78,6 +78,7 @@ void Renderer::Impl::createRenderTargets(VkFormat colorFormat) {
 }
 
 void Renderer::Impl::destroyRenderTargets() {
+    destroyHdrTargets(true);
     destroySurfaceTargets();
     if (targetsState.meshPipeline)
         vkDestroyPipeline(deviceState.device, targetsState.meshPipeline, nullptr);

@@ -2,6 +2,7 @@
 #include <theone/render/camera.hpp>
 #include <theone/render/render_scene.hpp>
 #include <memory>
+#include <theone/volumes/volume.hpp>
 #include <theone/render/frame_stats.hpp>
 #include <theone/render/asset_upload_stats.hpp>
 #include <theone/render/asset_memory_stats.hpp>
@@ -23,6 +24,12 @@ class Renderer {
     // Call before polling input; beginFrame remains compatible and idempotent.
     bool waitForFrame();
     void resize();
+    void enableHdr(bool enabled);
+    void setLighting(const SceneLighting& lighting);
+    void setVolumeScene(const VolumeScene& scene);
+    void clearVolumes();
+    const VolumeStats& volumeStats() const;
+    VolumeReadback captureVolumeState();
     bool render(const std::vector<Vertex>& vertices, const std::vector<Draw>& draws, const Camera& camera,
                 float time, bool capture = false, bool shadows = true, uint64_t selected = 0,
                 bool classicColor = false);
