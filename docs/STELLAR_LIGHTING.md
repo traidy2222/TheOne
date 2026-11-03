@@ -55,8 +55,10 @@ colorimetry or calibrated photometry. Inputs currently support 1000-10000 K and
 four emitters/sixteen spherical occluders. Very bright HDR values are bounded
 before FP16 storage to avoid nonfinite output.
 
-This feature does not simulate stellar interiors/fusion, limb darkening, a corona,
-atmospheres, interstellar dust, indirect surface illumination, gravity/orbits or
+Optional [procedural stellar activity](STELLAR_ACTIVITY_REFERENCES.md) adds
+convection, limb darkening, prescribed plasma arches and a raymarched corona.
+It is disabled by default. It does not simulate stellar interiors/fusion,
+magnetohydrodynamics, planetary atmospheres, interstellar dust, indirect surface illumination, gravity/orbits or
 time-retarded light propagation. Existing volumetric smoke lighting retains its
 separate sun/emissive-cache model; stellar volume scattering is not yet connected.
 The sandbox contains one star and authored test bodies, not a generated galaxy.
