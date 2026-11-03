@@ -221,6 +221,11 @@ set_target_properties(theone_volume_reference PROPERTIES RUNTIME_OUTPUT_DIRECTOR
 add_test(NAME engine_volume_reference COMMAND theone_volume_reference)
 
 add_executable(theone_stellar_reference lighting/stellar.cpp)
+add_executable(theone_mhd_reference lighting/mhd.cpp)
+target_link_libraries(theone_mhd_reference PRIVATE TheOne::Plasma)
+set_target_properties(theone_mhd_reference PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+add_test(NAME engine_mhd_reference COMMAND theone_mhd_reference)
+set_tests_properties(engine_mhd_reference PROPERTIES TIMEOUT 120)
 target_link_libraries(theone_stellar_reference PRIVATE TheOne::Lighting)
 set_target_properties(theone_stellar_reference PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 add_test(NAME engine_stellar_reference COMMAND theone_stellar_reference)
