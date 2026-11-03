@@ -220,6 +220,13 @@ int main() {
         auto outOfBand = capture();
         need(hotPatch[center] > outOfBand[center] + 10,
              "MHD temperature snapshot did not drive coronal emission");
+        for (auto& cell : patch->cells)
+            cell = {8e14f, 1.5e6f, 8e14f, 1.5e6f};
+        auto ambientPatch = capture();
+        patch->normal = {1, 0, 0};
+        patch->tangent = {0, 1, 0};
+        auto relocatedPatch = capture();
+        need(ambientPatch == relocatedPatch, "Unperturbed MHD patch introduced a ray-budget boundary seam");
         scene.plasma.reset();
         scene.stars[0].powerScale = 0;
         auto zero = capture();

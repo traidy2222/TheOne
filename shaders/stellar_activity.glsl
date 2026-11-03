@@ -140,11 +140,11 @@ struct ActivityField {
 bool hasPlasma(int star) {
     return int(vol.plasmaNormal.w) == star + 1;
 }
-float plasmaResponse(float temperature){
+float plasmaResponse(float temperature) {
     // Monochrome combines a broad range of coronal temperatures for inspection;
     // colour mode retains the narrower illustrative 1.5 MK response.
-    float width=int(vol.stellarCounts.w)==3?1.8:.48;
-    return exp(-.5*pow(log(max(temperature,100.)/1.5e6)/width,2));
+    float width = int(vol.stellarCounts.w) == 3 ? 1.8 : .48;
+    return exp(-.5 * pow(log(max(temperature, 100.) / 1.5e6) / width, 2));
 }
 vec4 plasmaSample(vec2 coord) {
     vec2 pixel = clamp(coord * vol.plasmaGrid.xy - .5, vec2(0), vol.plasmaGrid.xy - 1);
@@ -168,7 +168,7 @@ void plasmaField(vec3 p, inout ActivityField field) {
     float density = cell.x / 4e14, temperature = cell.y;
     float edge =
         smoothstep(0, .04, coord.x) * smoothstep(0, .04, 1 - coord.x) * smoothstep(0, .06, 1 - coord.y);
-    float weight = exp(-.5 * depth * depth) * edge;
+    float weight = exp(-.5 * depth * depth) * edge * (1 - smoothstep(3., 3.5, abs(depth)));
     // Synthetic optically thin coronal response, not a calibrated atomic line table.
     float response = plasmaResponse(temperature);
     float cool = 1 - smoothstep(6e4, 1.8e5, temperature);
@@ -197,7 +197,8 @@ vec2 activityTube(float planeDistance, float radialDistance, float width, float 
                     exp(-.5 * (planeDistance * planeDistance / e1 + radialDistance * radialDistance / e2));
     return vec2(density, measure);
 }
-ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds, int star) {
+ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds, int star,
+                                 bool includePatch) {
     ActivityField field;
     float radius = length(point), height = radius - 1;
     vec3 p = activityFrame(point, star), n = p / max(radius, 1e-8);
@@ -206,9 +207,11 @@ ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds
     float quiet = pow(max(radius, 1), -6) * (.55 + .45 * (1 - n.y * n.y));
     uint seed = uint(vol.starMotion[star].w);
     // Mostly angular modulation: fine density structures stretch radially.
-    float stream = activityNoise(n * 35 + vec3(0, height * .7, 0), seed + 172u);
-    float fine = activityNoise(n * 93 + vec3(height * .3, 0, 0), seed + 91u);
-    quiet *= .18 + 1.8 * stream * stream * (.5 + fine);
+    if (!hasPlasma(star)) {
+        float stream = activityNoise(n * 35 + vec3(0, height * .7, 0), seed + 172u);
+        float fine = activityNoise(n * 93 + vec3(height * .3, 0, 0), seed + 91u);
+        quiet *= .18 + 1.8 * stream * stream * (.5 + fine);
+    }
     field.electrons = quiet;
     field.hotMeasure = .025 * quiet * quiet;
     field.coolMeasure = 0;
@@ -276,7 +279,7 @@ ActivityField activityAtmosphere(vec3 point, vec3 ray, float footprint, float ds
     field.electrons *= taper;
     field.hotMeasure *= taper;
     field.coolMeasure *= taper;
-    if (hasPlasma(star))
+    if (hasPlasma(star) && includePatch)
         plasmaField(p, field);
     return field;
 }
@@ -322,7 +325,7 @@ void activityIntegrateRange(inout vec3 light, inout float transmission, vec3 ro,
         if (k >= count || transmission < .001)
             break;
         vec3 p = ro + ray * (lo + (k + .5) * ds);
-        ActivityField f = activityAtmosphere(p, ray, footprint, ds, star);
+        ActivityField f = activityAtmosphere(p, ray, footprint, ds, star, true);
         float radius = max(1, length(p));
         float sigma;
         vec3 source;
@@ -344,6 +347,47 @@ void activityIntegrateRange(inout vec3 light, inout float transmission, vec3 ro,
         transmission *= tr;
     }
 }
+// Integrate a consistent quiet baseline, then replace the local transfer.
+// An unperturbed patch cancels exactly, regardless of its projected bounds.
+vec4 activityMhdComposite(vec3 ro, vec3 ray, float lo, float hi, float nearPatch, float farPatch, bool hit,
+                          float footprint, int star, int mode) {
+    int budget = int(vol.starAtmosphere[star].x), baseCount = max(8, budget / 4),
+        patchCount = budget - baseCount;
+    nearPatch = clamp(nearPatch, lo, hi);
+    farPatch = clamp(farPatch, lo, hi);
+    vec3 gain =
+        dot(vol.starRadiance[star].rgb, vec3(.3333333)) * .15 * (mode == 3 ? vec3(1) : vec3(1, .36, .06));
+    vec3 baseline = vec3(0), behind = vec3(0);
+    float ds = (hi - lo) / baseCount;
+    for (int i = 0; i < 192; ++i) {
+        if (i >= baseCount)
+            break;
+        float a = lo + i * ds, b = a + ds;
+        vec3 p = ro + ray * (a + .5 * ds);
+        ActivityField f = activityAtmosphere(p, ray, footprint, ds, star, false);
+        vec3 source = gain * f.hotMeasure;
+        baseline += source * ds;
+        behind += source * max(0, b - max(a, farPatch));
+    }
+    if (!hit || farPatch <= nearPatch)
+        return vec4(baseline, 1);
+    vec3 actual = vec3(0), replaced = vec3(0);
+    float transmission = 1;
+    ds = (farPatch - nearPatch) / patchCount;
+    for (int i = 0; i < 192; ++i) {
+        if (i >= patchCount)
+            break;
+        vec3 p = ro + ray * (nearPatch + (i + .5) * ds);
+        ActivityField quiet = activityAtmosphere(p, ray, footprint, ds, star, false), f = quiet;
+        plasmaField(activityFrame(p, star), f);
+        float sigma = sqrt(max(0, f.coolMeasure)) * 35, optical = sigma * ds, tr = exp(-optical);
+        float integral = optical < .001 ? ds * (1 - optical * .5 + optical * optical / 6) : (1 - tr) / sigma;
+        actual += transmission * gain * f.hotMeasure * integral;
+        replaced += gain * quiet.hotMeasure * ds;
+        transmission *= tr;
+    }
+    return vec4(max(vec3(0), baseline + actual - replaced + (transmission - 1) * behind), transmission);
+}
 vec4 activityTransport(vec3 ro, vec3 ray, float coreHit, float clipping, float footprint, int star,
                        int mode) {
     float lo, hi;
@@ -357,7 +401,7 @@ vec4 activityTransport(vec3 ro, vec3 ray, float coreHit, float clipping, float f
     if (hi <= lo)
         return vec4(light, transmission);
     int budget = int(vol.starAtmosphere[star].x);
-    float thinLo, thinHi;
+    float thinLo = lo, thinHi = lo;
     bool patchHit = false;
     if (hasPlasma(star)) {
         float scale = vol.plasmaTangent.w;
@@ -368,6 +412,8 @@ vec4 activityTransport(vec3 ro, vec3 ray, float coreHit, float clipping, float f
         float bound = scale * length(vec3(halfX, halfY, vol.plasmaExtent.z * 3.5));
         patchHit = activityInterval(ro - centre, ray, bound, thinLo, thinHi) && thinHi > lo && thinLo < hi;
     }
+    if (hasPlasma(star) && (mode == 1 || mode == 3))
+        return activityMhdComposite(ro, ray, lo, hi, thinLo, thinHi, patchHit, footprint, star, mode);
     if (patchHit || (activityInterval(ro, ray, 1.023, thinLo, thinHi) && thinHi > lo && thinLo < hi)) {
         thinLo = clamp(thinLo, lo, hi);
         thinHi = clamp(thinHi, lo, hi);
