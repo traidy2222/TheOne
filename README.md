@@ -49,6 +49,7 @@ planet-scale streaming, or a universal performance guarantee.
 - [Dependencies and provenance](docs/DEPENDENCIES.md)
 - [Review of engine/game ownership](docs/ENGINE_GAME_BOUNDARY_REVIEW.md)
 - [Reactive smoke/fire: integration, model and limits](docs/VOLUMES.md)
+- [Finite stellar emitters and astronomical lighting](docs/STELLAR_LIGHTING.md)
 - [Smoke, fire and fuel-explosion research design](docs/VOLUMETRIC_EFFECTS_DESIGN.md)
 - [Latest cache performance evidence and limitations](docs/CACHE_CORRECTION_PERFORMANCE.md)
 
