@@ -1,7 +1,10 @@
 # Smoke, fire and fuel explosions
 
-Status: implementation design, 2026-11-03. No new volume renderer or fluid solver
-is implemented by this document. First acceptance target selected by the user:
+Status: original design and continuing research direction, 2026-11-03. The dense
+local implementation now exists; [VOLUMES.md](VOLUMES.md) documents its actual API,
+validation and deliberate approximations. Proposals below such as sparse fluid
+allocation and residual-based solver termination are not implemented features.
+First acceptance target selected by the user:
 **a fuel explosion becoming a rising smoke plume**.
 
 ## What realism means for this feature

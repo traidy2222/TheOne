@@ -2,7 +2,7 @@
 
 A Windows C++20/Vulkan engine for imported and procedural 3D scenes. The engine
 provides rendering, glTF assets, animation sampling, scene management, Jolt
-physics, input bindings and particle primitives.
+physics, input bindings, particle primitives and reactive volumetric smoke/fire.
 
 Games are maintained separately in [TheOneGames](https://github.com/traidy2222/TheOneGames).
 This repository contains no game executable or extracted commercial game data.
@@ -48,7 +48,8 @@ planet-scale streaming, or a universal performance guarantee.
 - [Game integration boundary](docs/PORTING.md)
 - [Dependencies and provenance](docs/DEPENDENCIES.md)
 - [Review of engine/game ownership](docs/ENGINE_GAME_BOUNDARY_REVIEW.md)
-- [Smoke, fire and fuel-explosion design](docs/VOLUMETRIC_EFFECTS_DESIGN.md) (design; not implemented)
+- [Reactive smoke/fire: integration, model and limits](docs/VOLUMES.md)
+- [Smoke, fire and fuel-explosion research design](docs/VOLUMETRIC_EFFECTS_DESIGN.md)
 - [Latest cache performance evidence and limitations](docs/CACHE_CORRECTION_PERFORMANCE.md)
 
 Historical benchmark documents describe their own source versions, fixtures and
