@@ -7,7 +7,7 @@ add_library(one_physics STATIC
   shape_cache.cpp
   body_state.cpp
   runtime.cpp
-  scene_loading.cpp
+  scene_loading.cpp scene_reuse.cpp
   simulation.cpp
   character.cpp
   motion.cpp

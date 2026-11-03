@@ -1,6 +1,7 @@
 add_library(one_scene STATIC
   picking.cpp
   picking_index.cpp
+  editor_history.cpp
   world.cpp
   serialization.cpp
   asset_loading.cpp
