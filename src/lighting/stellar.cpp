@@ -17,9 +17,27 @@ void validate(const StellarEmitter& s) {
              s.radiusMetres <= 1e15 && std::isfinite(s.kelvin) && s.kelvin >= 1000 && s.kelvin <= 10000 &&
              std::isfinite(s.powerScale) && s.powerScale >= 0 && s.powerScale <= 10,
          "Invalid stellar emitter");
+    if (s.activity.enabled) {
+        const auto& a = s.activity;
+        need(std::isfinite(a.granuleDiameterMetres) && a.granuleDiameterMetres >= s.radiusMetres / 1e7 &&
+                 a.granuleDiameterMetres <= s.radiusMetres && std::isfinite(a.granuleLifetimeSeconds) &&
+                 a.granuleLifetimeSeconds >= 1 && std::isfinite(a.rotationPeriodSeconds) &&
+                 a.rotationPeriodSeconds >= 1 && std::isfinite(a.granuleContrast) && a.granuleContrast >= 0 &&
+                 a.granuleContrast <= .15f && std::isfinite(a.limbDarkening) && a.limbDarkening >= 0 &&
+                 a.limbDarkening <= 1 && std::isfinite(a.magneticStrength) && a.magneticStrength >= 0 &&
+                 a.magneticStrength <= 2 && std::isfinite(a.baseElectronDensityPerM3) &&
+                 a.baseElectronDensityPerM3 >= 0 && a.baseElectronDensityPerM3 <= 1e16 &&
+                 std::isfinite(a.atmosphereRadius) && a.atmosphereRadius >= 1.05f &&
+                 a.atmosphereRadius <= 2.5f && a.atmosphereSteps >= 16 && a.atmosphereSteps <= 192 &&
+                 a.seed < 16777216,
+             "Invalid stellar activity model");
+    }
 }
 } // namespace
 void validateStellarScene(const StellarScene& scene) {
+    need(std::isfinite(scene.timeSeconds) && scene.timeSeconds >= 0 && scene.timeSeconds <= 1e9 &&
+             uint32_t(scene.view) <= 2,
+         "Invalid stellar activity clock/view");
     need(finite(scene.originMetres) && std::isfinite(scene.metresPerUnit) && scene.metresPerUnit > 0,
          "Invalid astronomical render origin/scale");
     need(scene.stars.size() <= 4 && scene.occluders.size() <= 16,
@@ -65,6 +83,16 @@ glm::dvec3 stellarBandRadiance(const StellarEmitter& s) {
                     (std::pow(l, 5) * std::expm1(.01438776877 / (l * s.kelvin))) * 1e-7;
     }
     return result;
+}
+double stellarLimbFactor(double cosine, double coefficient) {
+    need(std::isfinite(cosine) && std::isfinite(coefficient) && coefficient >= 0 && coefficient <= 1,
+         "Invalid limb darkening input");
+    return (1 - coefficient + coefficient * std::clamp(cosine, 0., 1.)) / (1 - coefficient / 3);
+}
+double stellarCoronalElectronDensity(const StellarEmitter& star, double radius) {
+    validate(star);
+    need(std::isfinite(radius) && radius >= 1, "Coronal radius must be outside photosphere");
+    return star.activity.enabled ? star.activity.baseElectronDensityPerM3 * std::pow(radius, -6) : 0;
 }
 double stellarVisibility(const StellarScene& scene, size_t index, glm::dvec3 p, uint64_t exclude,
                          uint32_t samples) {
