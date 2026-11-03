@@ -139,3 +139,5 @@ they do not establish photorealism on their own.
 
 The original [design](VOLUMETRIC_EFFECTS_DESIGN.md) records the broader research
 direction; the implemented contract and limits above describe the current code.
+See [validation evidence](VOLUME_VALIDATION.md) for measured numerical results and
+the separate consumer's actual captures.
