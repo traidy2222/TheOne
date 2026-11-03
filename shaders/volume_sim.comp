@@ -1,0 +1,474 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define VOLUME_WRITABLE
+#include "volume_common.glsl"
+layout(constant_id = 0) const uint operation = 0;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(push_constant) uniform Step {
+    uint phase;
+    uint readState;
+    uint pressureRead;
+    uint unused;
+    float dt;
+    float time;
+    uint padding0;
+    uint padding1;
+}
+step;
+void addFloat(uint i, float value) {
+    uint old = diagnostics[i];
+    for (;;) {
+        uint next = atomicCompSwap(diagnostics[i], old, floatBitsToUint(uintBitsToFloat(old) + value));
+        if (next == old)
+            break;
+        old = next;
+    }
+}
+float pressureAt(ivec3 i) {
+    if (outside(i))
+        return 0;
+    return step.pressureRead == 0 ? pressureA[cellIndex(i)] : pressureB[cellIndex(i)];
+}
+float faceInverseDensity(ivec3 i, int a) {
+    ivec3 j = i;
+    j[a]++;
+    return 2. / (density(stateCell(i, step.readState)) + density(stateCell(j, step.readState)));
+}
+float divergenceAt(ivec3 i) {
+    float d = 0;
+    for (int a = 0; a < 3; ++a) {
+        ivec3 j = i;
+        j[a]--;
+        d += (faceVelocity(i, a, step.readState) - faceVelocity(j, a, step.readState)) / spacing()[a];
+    }
+    return d;
+}
+vec3 initialAirVelocity(vec3 p) {
+    // Each component is independent of its own axis: analytic curl field with
+    // zero MAC divergence away from solid boundaries. Only initialized once;
+    // the ordinary velocity solver transports it thereafter.
+    float wavelength = max(vol.skyRadiance.w, 4 * max(spacing().x, max(spacing().y, spacing().z)));
+    vec3 q = (p - vol.origin.xyz) * (6.28318530718 / wavelength);
+    vec3 a =
+        vec3(cos(q.z + .7) + sin(q.y + 1.3), cos(q.x + .2) + sin(q.z + 2.1), cos(q.y + .9) + sin(q.x + 1.7));
+    q = q * .5 + vec3(.4, 1.9, .8);
+    vec3 b = vec3(sin(q.z) + cos(q.y), sin(q.x) + cos(q.z), sin(q.y) + cos(q.x));
+    return vol.windClosed.xyz + (a + .5 * b) * (vol.sunDirection.w / sqrt(3.75));
+}
+vec4 limiter(vec4 a, vec4 b) {
+    return mix(vec4(0), sign(a) * min(abs(a), abs(b)), greaterThan(a * b, vec4(0)));
+}
+vec2 limiter2(vec2 a, vec2 b) {
+    return mix(vec2(0), sign(a) * min(abs(a), abs(b)), greaterThan(a * b, vec2(0)));
+}
+void flux(ivec3 i, int a, out vec4 speciesFlux, out vec2 thermalFlux) {
+    ivec3 l = i, r = i, rr = i;
+    l[a]--;
+    r[a]++;
+    rr[a] += 2;
+    VolumeCell cl = stateCell(l, step.readState), c = stateCell(i, step.readState),
+               cr = stateCell(r, step.readState), crr = stateCell(rr, step.readState);
+    if (blockedFace(i, a)) {
+        speciesFlux = vec4(0);
+        thermalFlux = vec2(0);
+        return;
+    }
+    float v = faceVelocity(i, a, step.readState),
+          correction = .5 * max(0, 1 - abs(v) * step.dt / spacing()[a]);
+    vec4 q = v >= 0 ? c.species + correction * limiter(c.species - cl.species, cr.species - c.species)
+                    : cr.species - correction * limiter(cr.species - c.species, crr.species - cr.species);
+    vec2 h = v >= 0 ? c.thermal.xy +
+                          correction * limiter2(c.thermal.xy - cl.thermal.xy, cr.thermal.xy - c.thermal.xy)
+                    : cr.thermal.xy -
+                          correction * limiter2(cr.thermal.xy - c.thermal.xy, crr.thermal.xy - cr.thermal.xy);
+    speciesFlux = v * q;
+    thermalFlux = v * h;
+}
+vec3 centeredVelocity(ivec3 i) {
+    vec3 v;
+    for (int a = 0; a < 3; ++a) {
+        ivec3 j = i;
+        j[a]--;
+        v[a] = .5 * (faceVelocity(i, a, step.readState) + faceVelocity(j, a, step.readState));
+    }
+    return v;
+}
+vec3 curlAt(ivec3 i) {
+    vec3 derivative[3];
+    for (int a = 0; a < 3; ++a) {
+        ivec3 l = i, r = i;
+        l[a]--;
+        r[a]++;
+        derivative[a] = (centeredVelocity(r) - centeredVelocity(l)) / (2 * spacing()[a]);
+    }
+    return vec3(derivative[1].z - derivative[2].y, derivative[2].x - derivative[0].z,
+                derivative[0].y - derivative[1].x);
+}
+vec3 confinement(ivec3 i) {
+    vec3 gradient;
+    for (int a = 0; a < 3; ++a) {
+        ivec3 l = i, r = i;
+        l[a]--;
+        r[a]++;
+        gradient[a] = (length(curlAt(r)) - length(curlAt(l))) / (2 * spacing()[a]);
+    }
+    float magnitude = length(gradient);
+    return magnitude > 1e-7 ? vol.initial.z * min(spacing().x, min(spacing().y, spacing().z)) *
+                                  cross(gradient / magnitude, curlAt(i))
+                            : vec3(0);
+}
+float sampleFlame(vec3 world) {
+    vec3 x = (world - vol.origin.xyz) / spacing() - .5;
+    ivec3 base = ivec3(floor(x));
+    vec3 f = fract(x);
+    float value = 0;
+    for (int z = 0; z < 2; ++z)
+        for (int y = 0; y < 2; ++y)
+            for (int k = 0; k < 2; ++k) {
+                ivec3 o = ivec3(k, y, z), j = base + o;
+                vec3 w = mix(1 - f, f, vec3(o));
+                value += (!outside(j) && !solidCell(j) ? stateCell(j, step.readState).thermal.w : 1000) *
+                         w.x * w.y * w.z;
+            }
+    return value;
+}
+float flameFront(ivec3 i, VolumeCell c) {
+    float t = temperature(c), h = min(spacing().x, min(spacing().y, spacing().z));
+    bool combustible = c.species.x / density(c) >= uintBitsToFloat(vol.counts.w) && c.species.y > 1e-6;
+    if (!combustible && t < vol.fuel.w)
+        return 1000;
+    vec3 p = cellPosition(i);
+    float phi = sampleFlame(traceBack(p, p - sampleVelocity(p, step.readState) * step.dt));
+    for (int z = -1; z <= 1; ++z)
+        for (int y = -1; y <= 1; ++y)
+            for (int x = -1; x <= 1; ++x) {
+                ivec3 o = ivec3(x, y, z), j = i + o;
+                if ((x == 0 && y == 0 && z == 0) || outside(j) || solidCell(j))
+                    continue;
+                bool blocked = false;
+                for (int a = 0; a < 3; ++a)
+                    if (o[a] != 0) {
+                        ivec3 face = i;
+                        if (o[a] < 0)
+                            face[a]--;
+                        blocked = blocked || blockedFace(face, a);
+                    }
+                if (!blocked)
+                    phi = min(phi, stateCell(j, step.readState).thermal.w + length(vec3(o) * spacing()));
+            }
+    float speed = vol.initial.w + min(2., .2 * h * length(curlAt(i)));
+    phi -= speed * step.dt;
+    if (t >= vol.fuel.w)
+        phi = min(phi, -h * .5);
+    return phi;
+}
+shared float sums[64][14];
+void main() {
+    ivec3 i = ivec3(gl_GlobalInvocationID);
+    bool valid = !outside(i);
+    uint id = valid ? cellIndex(i) : 0, writeState = 1 - step.readState;
+    vec3 p = cellPosition(i), h = spacing();
+    if (operation == 9) {
+        uint lane = gl_LocalInvocationIndex;
+        VolumeCell c = valid && !solidCell(i) ? stateCell(i, step.readState) : ambientCell();
+        float dv = h.x * h.y * h.z;
+        for (uint a = 0; a < 4; ++a)
+            sums[lane][a] = valid && !solidCell(i) ? c.species[a] * dv : 0;
+        sums[lane][4] = valid && !solidCell(i) ? c.thermal.x * dv : 0;
+        sums[lane][5] = valid && !solidCell(i) ? c.thermal.y * dv : 0;
+        for (uint a = 0; a < 4; ++a) {
+            sums[lane][6 + a] = valid ? ledgers[id].budget[a] : 0;
+            sums[lane][10 + a] = valid ? ledgers[id].species[a] : 0;
+        }
+        if (valid && !solidCell(i)) {
+            atomicMax(diagnostics[8], floatBitsToUint(temperature(c)));
+            atomicMax(diagnostics[9], floatBitsToUint(length(c.velocity.xyz)));
+            if (c.species.z > 1e-6)
+                atomicAdd(diagnostics[10], 1);
+            atomicMax(diagnostics[11], floatBitsToUint(abs(divergenceAt(i) - c.thermal.z)));
+        }
+        barrier();
+        for (uint span = 32; span > 0; span /= 2) {
+            if (lane < span)
+                for (uint a = 0; a < 14; ++a)
+                    sums[lane][a] += sums[lane + span][a];
+            barrier();
+        }
+        if (lane == 0) {
+            for (uint a = 0; a < 6; ++a)
+                addFloat(a, sums[0][a]);
+            for (uint a = 0; a < 8; ++a)
+                addFloat(16 + a, sums[0][6 + a]);
+        }
+        return;
+    }
+    if (!valid)
+        return;
+    if (operation == 0) {
+        VolumeCell c = ambientCell();
+        for (int axis = 0; axis < 3; ++axis) {
+            vec3 face = p;
+            face[axis] += h[axis] * .5;
+            c.velocity[axis] = initialAirVelocity(face)[axis];
+            if (blockedFace(i, axis))
+                c.velocity[axis] = boundaryVelocity(face)[axis];
+        }
+        c.species.z = vol.initial.x;
+        c.thermal.y = (density(c))*vol.gas.z * (vol.initial.y > 0 ? vol.initial.y : vol.gas.x);
+        if (solidCell(i)) {
+            c.species = vec4(0);
+            c.thermal = vec4(0, 0, 0, 1000);
+            c.velocity.w = 1;
+        }
+        cellsA[id] = c;
+        cellsB[id] = c;
+        pressureA[id] = pressureB[id] = rhs[id] = 0;
+        volumeLight[id] = vec4(0, 0, 0, 1);
+        return;
+    }
+    VolumeCell c = stateCell(i, step.readState);
+    if (operation == 12) {
+        ivec3 bricks = (dimensions() + 7) / 8;
+        if (any(greaterThanEqual(i, bricks)))
+            return;
+        float occupied = 0, weight = 0, secondMoment = 0;
+        vec3 intensity = vec3(0), weightedPosition = vec3(0);
+        float dv = h.x * h.y * h.z;
+        for (int z = -1; z <= 8; ++z)
+            for (int y = -1; y <= 8; ++y)
+                for (int x = -1; x <= 8; ++x) {
+                    ivec3 j = i * 8 + ivec3(x, y, z);
+                    if (outside(j) || solidCell(j))
+                        continue;
+                    VolumeCell value = stateCell(j, step.readState);
+                    occupied = max(occupied, value.species.z);
+                    if (x < 0 || y < 0 || z < 0 || x > 7 || y > 7 || z > 7 || value.species.z < 1e-10)
+                        continue;
+                    vec3 emission = value.species.z * vol.optics.x * thermalRadiance(temperature(value)) * dv;
+                    float w = max(emission.r, max(emission.g, emission.b));
+                    vec3 p = cellPosition(j);
+                    intensity += emission;
+                    weight += w;
+                    weightedPosition += w * p;
+                    secondMoment += w * dot(p, p);
+                }
+        uint b = uint((i.z * bricks.y + i.y) * bricks.x + i.x),
+             base = uint(dimensions().x * dimensions().y * dimensions().z) * 2;
+        vec3 center = weight > 1e-10 ? weightedPosition / weight : cellPosition(i * 8);
+        float radius2 = weight > 1e-10 ? max(0, secondMoment / weight - dot(center, center)) : 0;
+        volumeLight[base + b * 2] = vec4(intensity, occupied);
+        volumeLight[base + b * 2 + 1] = vec4(center, max(radius2, dot(h, h) * .08));
+        if (weight > 1e-5) {
+            uint slot = atomicAdd(diagnostics[26], 1);
+            volumeLight[base + uint(bricks.x * bricks.y * bricks.z) * 2 + slot] = vec4(float(b), 0, 0, 0);
+        }
+        return;
+    }
+    if (operation == 13) {
+        bool solid = solidCell(i);
+        VolumeCell result = c;
+        if (c.velocity.w > .5) {
+            result.species = vec4(0);
+            result.thermal = vec4(0, 0, 0, 1000);
+        }
+        if (solid) {
+            result.species = vec4(0);
+            result.thermal = vec4(0, 0, 0, 1000);
+            result.velocity = vec4(boundaryVelocity(p), 1);
+        } else {
+            for (int a = 0; a < 3; ++a)
+                for (int side = -1; side <= 1; side += 2) {
+                    ivec3 donor = i;
+                    donor[a] += side;
+                    if (outside(donor))
+                        continue;
+                    VolumeCell old = stateCell(donor, step.readState);
+                    if (old.velocity.w > .5 || !solidCell(donor))
+                        continue;
+                    int recipients = 0;
+                    for (int axis = 0; axis < 3; ++axis)
+                        for (int s = -1; s <= 1; s += 2) {
+                            ivec3 target = donor;
+                            target[axis] += s;
+                            if (!outside(target) && !solidCell(target))
+                                recipients++;
+                        }
+                    if (recipients > 0) {
+                        result.species += old.species / recipients;
+                        result.thermal.xy += old.thermal.xy / recipients;
+                    }
+                }
+            result.velocity.w = 0;
+        }
+        storeCell(i, writeState, result);
+        return;
+    }
+    if (operation == 1) {
+        for (int a = 0; a < 3; ++a) {
+            vec3 q = p;
+            q[a] += h[a] * .5;
+            vec3 u = sampleVelocity(q, step.readState);
+            vec3 mid = traceBack(q, q - u * step.dt * .5);
+            vec3 back = traceBack(q, q - sampleVelocity(mid, step.readState) * step.dt);
+            c.velocity[a] = sampleVelocity(back, step.readState)[a];
+            if (blockedFace(i, a))
+                c.velocity[a] = boundaryVelocity(q)[a];
+        }
+        storeCell(i, writeState, c);
+        return;
+    }
+    if (operation == 2) {
+        if (solidCell(i)) {
+            c.species = vec4(0);
+            c.thermal = vec4(0);
+            storeCell(i, writeState, c);
+            return;
+        }
+        vec4 dq = vec4(0), boundarySpecies = vec4(0);
+        vec2 dh = vec2(0), boundaryThermal = vec2(0);
+        for (int a = 0; a < 3; ++a) {
+            ivec3 low = i, high = i;
+            low[a]--;
+            high[a]++;
+            float vp = faceVelocity(i, a, step.readState), vm = faceVelocity(low, a, step.readState);
+            VolumeCell l = stateCell(low, step.readState), r = stateCell(high, step.readState);
+            vec4 qp, qm;
+            vec2 hp, hm;
+            flux(i, a, qp, hp);
+            flux(low, a, qm, hm);
+            dq += (qp - qm) / h[a];
+            dh += (hp - hm) / h[a];
+            if (i[a] == dimensions()[a] - 1) {
+                boundarySpecies += qp / h[a];
+                boundaryThermal += hp / h[a];
+            }
+            if (i[a] == 0) {
+                boundarySpecies -= qm / h[a];
+                boundaryThermal -= hm / h[a];
+            }
+        }
+        c.species = max(vec4(0), c.species - step.dt * dq);
+        c.thermal.xy = max(vec2(0), c.thermal.xy - step.dt * dh);
+        float oldH = max(c.thermal.y, 1);
+        float extraHeat = 0;
+        for (uint s = 0; s < vol.counts.x; ++s) {
+            float sourceDt =
+                max(0., min(step.time + step.dt, vol.sourceInterval[s].x + vol.sourceInterval[s].y) -
+                            max(step.time, vol.sourceInterval[s].x));
+            if (sourceDt <= 0)
+                continue;
+            vec3 q = (p - vol.sourcePosition[s].xyz) / vol.sourcePosition[s].w;
+            float w = max(0, 1 - dot(q, q));
+            w = w * w / max(1e-10, vol.sourceRates[s].w) * sourceDt;
+            float fuel = w * vol.sourceRates[s].x, soot = w * vol.sourceRates[s].y,
+                  heat = w * vol.sourceRates[s].z;
+            c.species.x += fuel;
+            c.species.z += soot;
+            extraHeat += heat + (fuel + soot) * vol.gas.z * vol.gas.x;
+        }
+        c.thermal.y += extraHeat;
+        float t = temperature(c);
+        c.thermal.w = flameFront(i, c);
+        float burn = (t >= vol.fuel.w || c.thermal.w <= 0)
+                         ? min(c.species.x * (1 - exp(-vol.optics.w * step.dt)), c.species.y / vol.fuel.y)
+                         : 0;
+        c.species.x -= burn;
+        c.species.y -= burn * vol.fuel.y;
+        c.species.z += burn * vol.fuel.z;
+        c.species.w += burn * (1 + vol.fuel.y - vol.fuel.z);
+        float released = burn * vol.fuel.x;
+        c.thermal.y += released;
+        t = temperature(c);
+        float excess = max(0, c.thermal.y - density(c) * vol.gas.z * vol.gas.x);
+        float cooling = excess * (1 - exp(-vol.gas.w * step.dt));
+        float radiative = 4 * c.species.z * vol.optics.x * 5.670374419e-8 *
+                          max(0, pow(min(t, 6000.), 4) - pow(vol.gas.x, 4)) * step.dt;
+        float lost = min(excess, cooling + radiative);
+        c.thermal.y -= lost;
+        c.thermal.z = vol.windClosed.w > .5 ? 0 : (released + extraHeat - lost) / (oldH * step.dt);
+        float dv = h.x * h.y * h.z;
+        ledgers[id].budget += vec4(burn, lost / step.dt, (dot(boundarySpecies, vec4(1)) + boundaryThermal.x),
+                                   boundaryThermal.y) *
+                              vec4(dv, step.dt * dv, step.dt * dv, step.dt * dv);
+        ledgers[id].species += boundarySpecies * step.dt * dv;
+        storeCell(i, writeState, c);
+        return;
+    }
+    if (operation == 3) {
+        vec3 vort =
+            (vol.initial.z > 0 && (c.species.z > 1e-7 || c.species.x > 1e-6)) ? confinement(i) : vec3(0);
+        for (int a = 0; a < 3; ++a) {
+            ivec3 j = i;
+            j[a]++;
+            VolumeCell next = stateCell(j, step.readState);
+            float t = .5 * (temperature(c) + temperature(next));
+            float buoyancy = (t - vol.gas.x) / vol.gas.x;
+            c.velocity[a] += (-vol.gravityMax[a] * buoyancy + vort[a]) * step.dt;
+            c.velocity[a] += (vol.windClosed[a] - c.velocity[a]) * (1 - exp(-.08 * step.dt));
+            for (uint s = 0; s < vol.counts.x; ++s) {
+                float sourceDt =
+                    max(0., min(step.time + step.dt, vol.sourceInterval[s].x + vol.sourceInterval[s].y) -
+                                max(step.time, vol.sourceInterval[s].x));
+                vec3 q = (p - vol.sourcePosition[s].xyz) / vol.sourcePosition[s].w;
+                float w = max(0, 1 - dot(q, q));
+                vec3 jet = vol.sourceVelocity[s].xyz;
+                float injected = (vol.sourceRates[s].x + vol.sourceRates[s].y) * w * w /
+                                 max(1e-10, vol.sourceRates[s].w) * sourceDt;
+                c.velocity[a] += (jet[a] - c.velocity[a]) * injected / max(.0001, density(c) + injected);
+            }
+            if (abs(c.velocity[a]) > vol.gravityMax.w)
+                atomicAdd(diagnostics[12], 1);
+            c.velocity[a] = clamp(c.velocity[a], -vol.gravityMax.w, vol.gravityMax.w);
+            if (blockedFace(i, a)) {
+                vec3 q = p;
+                q[a] += h[a] * .5;
+                c.velocity[a] = boundaryVelocity(q)[a];
+            }
+        }
+        storeCell(i, writeState, c);
+        return;
+    }
+    if (operation == 4) {
+        rhs[id] = solidCell(i) ? 0 : (divergenceAt(i) - c.thermal.z) / step.dt;
+        pressureA[id] = pressureB[id] = 0;
+        atomicMax(diagnostics[13], floatBitsToUint(abs(rhs[id] * step.dt)));
+        return;
+    }
+    if (operation == 5) {
+        float numerator = 0, denominator = 0;
+        for (int a = 0; a < 3; ++a)
+            for (int sign = -1; sign <= 1; sign += 2) {
+                ivec3 j = i;
+                j[a] += sign;
+                ivec3 face = sign > 0 ? i : j;
+                if (blockedFace(face, a))
+                    continue;
+                float coefficient = faceInverseDensity(face, a) / (h[a] * h[a]);
+                numerator += coefficient * pressureAt(j);
+                denominator += coefficient;
+            }
+        float pressure = denominator > 0 && !solidCell(i) ? (numerator - rhs[id]) / denominator : 0;
+        if (step.pressureRead == 0)
+            pressureB[id] = pressure;
+        else
+            pressureA[id] = pressure;
+        return;
+    }
+    if (operation == 6) {
+        for (int a = 0; a < 3; ++a) {
+            ivec3 j = i;
+            j[a]++;
+            if (blockedFace(i, a)) {
+                vec3 q = p;
+                q[a] += h[a] * .5;
+                c.velocity[a] = boundaryVelocity(q)[a];
+            } else
+                c.velocity[a] -= step.dt * faceInverseDensity(i, a) * (pressureAt(j) - pressureAt(i)) / h[a];
+            if (abs(c.velocity[a]) > vol.gravityMax.w)
+                atomicAdd(diagnostics[12], 1);
+            c.velocity[a] = clamp(c.velocity[a], -vol.gravityMax.w, vol.gravityMax.w);
+        }
+        storeCell(i, writeState, c);
+        return;
+    }
+}

@@ -1,0 +1,88 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define VOLUME_WRITABLE
+#include "volume_common.glsl"
+layout(constant_id = 0) const uint lightOperation = 0;
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+vec3 lightPosition(ivec3 i) {
+    return vol.origin.xyz - vol.extent.xyz * .5 + (vec3(i) + .5) * spacing() * 2;
+}
+bool inFluid(vec3 p) {
+    return all(greaterThanEqual(p, vol.origin.xyz)) && all(lessThanEqual(p, vol.origin.xyz + vol.extent.xyz));
+}
+float attenuation(vec3 p, vec3 direction, float start, float end) {
+    float optical = 0;
+    float ds = (end - start) / 12.;
+    for (int k = 0; k < 12; ++k) {
+        vec3 q = p + direction * (start + (k + .5) * ds);
+        if (inFluid(q))
+            optical += max(0, sampleState(q).species.z) * (vol.optics.x + vol.optics.y) * ds;
+    }
+    return exp(-optical);
+}
+void main() {
+    ivec3 i = ivec3(gl_GlobalInvocationID);
+    if (outside(i))
+        return;
+    uint id = cellIndex(i), n = uint(dimensions().x * dimensions().y * dimensions().z);
+    vec3 p = lightPosition(i), h = spacing() * 2;
+    if (lightOperation == 1) {
+        vec4 direct = volumeLight[id];
+        VolumeCell c = ambientCell();
+        if (inFluid(p))
+            c = sampleState(p);
+        float sigma = max(0, c.species.z) * (vol.optics.x + vol.optics.y);
+        float albedo = vol.optics.y / max(.0001, vol.optics.x + vol.optics.y);
+        float r = albedo * (1 - exp(-sigma * min(h.x, min(h.y, h.z))));
+        vec3 incident = vec3(0);
+        for (int a = 0; a < 3; ++a)
+            for (int side = -1; side <= 1; side += 2) {
+                ivec3 j = i;
+                j[a] += side;
+                vec4 l = outside(j) ? vec4(0, 0, 0, 1) : volumeLight[cellIndex(j)];
+                if (!outside(j) && solidAt(lightPosition(j)))
+                    continue;
+                incident += (vol.sunRadiance.xyz * l.w + vol.skyRadiance.xyz * 12.5663706144 + l.rgb) / 6.;
+            }
+        volumeLight[id + n] = vec4(direct.rgb + incident * r / max(.05, 1 - r), direct.w);
+        return;
+    }
+    if (solidAt(p)) {
+        volumeLight[id] = vec4(0, 0, 0, 1);
+        return;
+    }
+    float lo = 0, hi = 1e4;
+    float sun = 1;
+    if (rayBox(p, vol.sunDirection.xyz, vol.origin.xyz, vol.origin.xyz + vol.extent.xyz, lo, hi))
+        sun = attenuation(p, vol.sunDirection.xyz, lo, hi);
+    sun *= opaqueSunVisibility(p);
+    ivec3 bricks = (dimensions() + 7) / 8;
+    uint proxyBase = n * 2, listBase = proxyBase + uint(bricks.x * bricks.y * bricks.z) * 2;
+    vec3 irradiance = vec3(0);
+    for (uint source = 0; source < diagnostics[26]; ++source) {
+        uint b = uint(volumeLight[listBase + source].x);
+        vec4 power = volumeLight[proxyBase + b * 2], position = volumeLight[proxyBase + b * 2 + 1];
+        vec3 delta = position.xyz - p;
+        float distance = length(delta);
+        if (distance < .001)
+            continue;
+        vec3 direction = delta / distance;
+        bool blocked = false;
+        for (uint obstacle = 0; obstacle < vol.counts.y; ++obstacle) {
+            float nearT = .001, farT = distance - .001;
+            if (rayBox(p, direction, vol.solidMin[obstacle].xyz, vol.solidMax[obstacle].xyz, nearT, farT)) {
+                blocked = true;
+                break;
+            }
+        }
+        if (blocked)
+            continue;
+        float entry = 0, exit = distance;
+        float transmittance =
+            rayBox(p, direction, vol.origin.xyz, vol.origin.xyz + vol.extent.xyz, entry, exit)
+                ? attenuation(p, direction, entry, exit)
+                : 1.;
+        irradiance += power.rgb * transmittance / max(position.w, distance * distance);
+    }
+    volumeLight[id] = vec4(irradiance, sun);
+}
